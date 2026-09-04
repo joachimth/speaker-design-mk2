@@ -166,14 +166,11 @@ export function calcHornResponse(
     }
 
     // Mouth radiation impedance (piston in infinite baffle)
-    const mouthRadius = Math.sqrt(Sm / Math.PI);
-    const ka = k * mouthRadius;
+    
+    
     // Z_mouth = rho_0 * c * (1 - J1(2ka)/(ka)) + j * rho_0 * c * (S1(2ka)/(ka))
     // Simplified: use resistive part only
-    const zMouth = RHO_0 * C / Sm * (1 - 2 * besselJ1(2 * ka) / (2 * ka + 1e-30));
-
-    // Throat impedance (computed but not directly used in simplified model)
-    // zThroat = (totalMatrix.b + totalMatrix.a * zMouth) / (totalMatrix.d + totalMatrix.c * zMouth)
+    // const zMouth = RHO_0 * C / Sm * (1 - 2 * besselJ1(2 * ka) / (2 * ka + 1e-30));
 
     // Throat response (driver sees throat impedance)
     // Loading increases with frequency above cutoff
@@ -204,27 +201,3 @@ export function calcHornResponse(
   };
 }
 
-/** Bessel function J1, order 1 (simplified) */
-function besselJ1(x: number): number {
-  if (Math.abs(x) < 8) {
-    let sum = 0;
-    const x2 = (x / 2) ** 2;
-    let term = x / 2;
-    sum = term;
-    for (let n = 1; n < 20; n++) {
-      term *= -x2 / (n * (n + 1));
-      sum += term;
-      if (Math.abs(term) < 1e-12) break;
-    }
-    return sum;
-  } else {
-    const ax = Math.abs(x);
-    const z = 8 / ax;
-    const y = z * z;
-    const xx = ax - 2.356194491;
-    const p1 = 1.0 + y * (0.183105e-2 + y * (-0.3516396496e-4 + y * (0.2457520174e-5)));
-    const p2 = 1.0 + y * (0.04687499995 + y * (-0.2002690873e-3));
-    const result = Math.sqrt(0.636619772 / ax) * (Math.cos(xx) * p1 - z * Math.sin(xx) * p2);
-    return x < 0 ? -result : result;
-  }
-}
