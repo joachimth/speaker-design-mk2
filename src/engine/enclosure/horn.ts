@@ -172,9 +172,8 @@ export function calcHornResponse(
     // Simplified: use resistive part only
     const zMouth = RHO_0 * C / Sm * (1 - 2 * besselJ1(2 * ka) / (2 * ka + 1e-30));
 
-    // Throat impedance
-    
-                    (totalMatrix.d + totalMatrix.c * zMouth);
+    // Throat impedance (computed but not directly used in simplified model)
+    // zThroat = (totalMatrix.b + totalMatrix.a * zMouth) / (totalMatrix.d + totalMatrix.c * zMouth)
 
     // Throat response (driver sees throat impedance)
     // Loading increases with frequency above cutoff
