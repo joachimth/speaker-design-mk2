@@ -139,3 +139,100 @@ export function roundoverEffect(
   const fRoundover = C / (4 * roundoverRadius);
   return frequencies.map((f) => 1 / (1 + (f / fRoundover) ** 2));
 }
+
+// ---------------------------------------------------------------------------
+// Edge-diffraction model with driver position
+// ---------------------------------------------------------------------------
+
+/**
+ * On-axis edge-diffraction response for a driver at (xMm, yMm) on a
+ * rectangular baffle — replaces the smooth first-order shelf with a real
+ * edge-integral model.
+ *
+ * Model (far field, on axis; Vanderkooy/BDS-style discretization):
+ * the baffle edge is split into segments; each segment re-radiates the
+ * incident wave with amplitude -(Δθ/2π)·½ (the 4π→2π transition), delayed by
+ * the driver→edge distance r:
+ *
+ *   p(f) = 1 - Σᵢ (Δθᵢ/2π) · ½ · g(f) · e^(−j·2πf·rᵢ/c)
+ *
+ * Limits: f→0 gives p=½ (−6 dB, 4π radiation); at HF the phasors decorrelate
+ * and p ripples around 1 (0 dB, 2π reference). The ripple period and depth
+ * depend on the driver's distances to the edges — an off-center driver
+ * spreads the distances and flattens the ripple, which is why offset
+ * tweeter mounting exists.
+ *
+ * g(f) = 1/(1+(f/f_r)²) with f_r = c/(4·roundover) models how a front-edge
+ * roundover progressively removes the sharp-edge re-radiation at high
+ * frequencies (approximation; a roundover cannot restore LF loss).
+ *
+ * The driver is treated as a point source at the cutout center. Segment
+ * length adapts to the highest frequency so phase steps stay < π/2 at 20 kHz.
+ * Results are cached (pure function of the arguments).
+ */
+const diffractionCache = new Map<string, number[]>();
+
+export function calcBaffleDiffraction(
+  baffleWidth: number,
+  baffleHeight: number,
+  driverXMm: number,
+  driverYMm: number,
+  roundoverRadius: number,
+  frequencies: number[],
+): number[] {
+  const key = `${baffleWidth}x${baffleHeight}@${driverXMm.toFixed(1)},${driverYMm.toFixed(1)}r${roundoverRadius}n${frequencies.length}f${frequencies[0]?.toFixed(2)}-${frequencies[frequencies.length - 1]?.toFixed(2)}`;
+  const cached = diffractionCache.get(key);
+  if (cached) return cached;
+
+  // Clamp the source strictly inside the baffle
+  const x0 = Math.min(Math.max(driverXMm, 1), baffleWidth - 1);
+  const y0 = Math.min(Math.max(driverYMm, 1), baffleHeight - 1);
+
+  // Segment length: phase step < π/2 at 20 kHz → Δs < c/(4·20000) ≈ 4.3 mm
+  const SEG = 4;
+  const corners = [
+    [0, 0], [baffleWidth, 0], [baffleWidth, baffleHeight], [0, baffleHeight],
+  ] as const;
+
+  // Discretize the perimeter; per segment: subtended angle Δθ and distance r
+  const segs: { dTheta: number; rMm: number }[] = [];
+  for (let e = 0; e < 4; e++) {
+    const [ax, ay] = corners[e]!;
+    const [bx, by] = corners[(e + 1) % 4]!;
+    const len = Math.hypot(bx - ax, by - ay);
+    const n = Math.max(8, Math.ceil(len / SEG));
+    let prevTheta = Math.atan2(ay - y0, ax - x0);
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      const px = ax + (bx - ax) * t;
+      const py = ay + (by - ay) * t;
+      const theta = Math.atan2(py - y0, px - x0);
+      let d = theta - prevTheta;
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      const mx = ax + (bx - ax) * (t - 0.5 / n);
+      const my = ay + (by - ay) * (t - 0.5 / n);
+      segs.push({ dTheta: Math.abs(d), rMm: Math.hypot(mx - x0, my - y0) });
+      prevTheta = theta;
+    }
+  }
+
+  const fR = roundoverRadius > 0 ? C / (4 * roundoverRadius) : Infinity;
+  const result = frequencies.map((f) => {
+    const g = roundoverRadius > 0 ? 1 / (1 + (f / fR) ** 2) : 1;
+    let re = 1;
+    let im = 0;
+    const k = (2 * Math.PI * f) / C; // rad per mm
+    for (const s of segs) {
+      const amp = (s.dTheta / (2 * Math.PI)) * 0.5 * g;
+      const phase = -k * s.rMm;
+      re -= amp * Math.cos(phase);
+      im -= amp * Math.sin(phase);
+    }
+    return 20 * Math.log10(Math.max(Math.hypot(re, im), 1e-6));
+  });
+
+  if (diffractionCache.size > 64) diffractionCache.clear();
+  diffractionCache.set(key, result);
+  return result;
+}

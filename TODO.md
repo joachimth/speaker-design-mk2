@@ -47,14 +47,15 @@ Langsigtet status mod spec: se [ROADMAP.md](ROADMAP.md). Krav: [docs/SPEC.md](do
 - [x] "Hvorfor ser det sådan ud?"-annotationslag (lib/annotations.ts, testet) — bafflestep, kantdiffraktion, port/PR/bandpass-tuning, TL ¼-bølge, hornlængde, dipol-peak, delefrekvenser og F3 som markører + forklaringsliste på responsplottet
 - [x] Design-versionering (SPEC §3) — snapshots med parent_version i IndexedDB (db v2, designVersions-tabel), Gem version/Gendan-kort i dashboardet, lineage/nummererings-helpers testet
 - [x] Hypex FusionAmp / ADAU-eksport (lib/export/hypexAdau.ts, testet) — biquad-kaskader pr. kanal i tilbagekoblingsform (konvention angivet i headeren), ADAU også med 5.23-hex; gain/polaritet/delay pr. kanal. Tekstark til manuel indtastning i HFD/SigmaStudio — ingen native filformater
-- [ ] Akustiske mål-slopes (optimizer finder elektrisk filter der rammer akustisk LR4) — flyttet til Fase F
+- [x] Akustiske mål-slopes (optimizer finder elektrisk filter der rammer akustisk LR4) — leveret i Fase F
 - [ ] Golden tests mod WinISD/Hornresp CSV (fortsat åbent — eksterne kørsler)
 
-### Fase F — næste
-- [ ] Akustiske mål-slopes (SPEC §4.14)
-- [ ] Dashboard: Kabinet-fane (3D + stående bølger) + fuld inline-redigering i venstrekolonnen
-- [ ] OpenSCAD-parametre / DXF til baffeludskæring
-- [ ] Golden tests mod WinISD/Hornresp CSV (eksterne kørsler)
+### Fase F — leveret
+- [x] Akustiske mål-slopes (SPEC §5.4): `lib/acoustic/targetSlopes.ts` + kort i CrossoverDesigner. Brugeren vælger akustisk mål (LR2/BW4/LR4/LR8 @ f); fittet finder elektrisk type+frekvens mod den baffle-korrigerede råkurve (deterministisk grid + fin-scan, stopbånds-guard, dobbeltvægt ±1 oktav om målet). Ændrer kun filtertype/-frekvens — aldrig gain. NB: BW4 ≡ LR4 i crossover.ts (dokumenteret forenkling)
+- [x] Dashboard: Kabinet-fane — inline-redigering (kabinettype/Vb/Fb/port/baffelmål/roundover), stående bølger pr. akse (indv. dybde afledt af volumen), panelresonans (materiale/tykkelse/braces, front + side) og CAD-eksport. 3D bor fortsat i Kabinetdesign (link) — ikke embeddet i dashboardet
+- [x] OpenSCAD-parametre / DXF R12 til baffeludskæring: `lib/export/openscadDxf.ts` — parametrisk .scad (alle mål som variabler) + DXF med outline og udskæringscirkler. Driverpositioner = deterministisk lodret stak (deles med diffraktionsmodellen via `lib/acoustic/baffleLayout.ts`)
+- [x] Positionsafhængig kant-diffraktion (Joachims feedback 5/9): `calcBaffleDiffraction` — Vanderkooy-stil edge-integral pr. bånd (driver→kant-afstande, Δθ-vægtet, ripple + 6 dB-step i én model), roundover-dæmpning, wiret gennem processBand/simulateOnAxisWithBands/worker/optimizer/mål-slope-fit. Fallback til gammel shelf når driver-stakken ikke kan ligge på baflen. Punktkilde-antagelse (cutout-center); lytteposition on-axis far-field
+- [ ] Golden tests mod WinISD/Hornresp CSV (eksterne kørsler — kan ikke laves i sandboxen; kræver kørsler på Joachims maskine)
 
 ## Regler (fra Joachim, gælder al optimizer-kode)
 - Gains må KUN dæmpe, aldrig booste. Bånd 0 (woofer) altid låst på 0 dB.

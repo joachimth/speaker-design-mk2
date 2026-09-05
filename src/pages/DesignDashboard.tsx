@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDriverStore } from '@/store/driverStore'
 import { useDesignStore } from '@/store/designStore'
-import { Card, Button, StatCard, NumberInput } from '@/components/common/UI'
+import { Card, Button, StatCard, NumberInput, Select } from '@/components/common/UI'
 import { ResponsivePlot } from '@/components/charts/ResponsivePlot'
 import { evaluateDesign, type HealthAction, type HealthWarning } from '@/lib/designHealth'
 import { simulateOnAxisWithBands } from '@/lib/acoustic/simulateBands'
@@ -34,7 +34,20 @@ import { downloadBuildSheet } from '@/lib/export/buildSheet'
 import { downloadCamillaDSP } from '@/lib/export/camillaDSP'
 import { downloadEqAPO } from '@/lib/export/eqApo'
 import { downloadHypex, downloadAdau } from '@/lib/export/hypexAdau'
-import type { DesignState, DesignVersion, Driver } from '@/types'
+import {
+  defaultDriverLayout,
+  defaultPortPosition,
+  downloadOpenScad,
+  downloadBaffleDxf,
+  type BaffleCutSpec,
+} from '@/lib/export/openscadDxf'
+import {
+  standingWave,
+  evaluatePanel,
+  PANEL_MATERIALS,
+  type PanelMaterialKey,
+} from '@/lib/acoustic/panelResonance'
+import type { CabinetType, DesignState, DesignVersion, Driver } from '@/types'
 
 const STATUS_STYLE: Record<string, { dot: string; box: string }> = {
   ready: {
@@ -59,6 +72,7 @@ const BAND_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6']
 
 const TABS = [
   { id: 'oversigt', label: 'Oversigt' },
+  { id: 'kabinet', label: 'Kabinet' },
   { id: 'spinorama', label: 'Spinorama' },
   { id: 'xo', label: 'Delefilter' },
   { id: 'impedans', label: 'Impedans' },
@@ -95,6 +109,9 @@ export default function DesignDashboard() {
   const [showWhy, setShowWhy] = useState(false)
   const [versions, setVersions] = useState<DesignVersion[]>([])
   const [versionNote, setVersionNote] = useState('')
+  const [panelMat, setPanelMat] = useState<PanelMaterialKey>('mdf')
+  const [wallT, setWallT] = useState(19)
+  const [braces, setBraces] = useState(1)
 
   const health = useMemo(
     () => evaluateDesign(design, drivers, { powerW }),
@@ -117,6 +134,7 @@ export default function DesignDashboard() {
         activeBands, drivers, freqs,
         design.baffleWidth, design.baffleHeight,
         design.cabinetType, effFb, effVb, design.portDiameter, design.numPorts,
+        design.roundoverRadius,
       )
     } catch {
       return null
@@ -225,6 +243,52 @@ export default function DesignDashboard() {
       return null
     }
   }, [tab, bassTs, design, effVb, effFb, powerW])
+
+  // Kabinet tab: inner dimensions, standing waves, panels, CAD spec.
+  // Depth is derived from the effective volume and the actual baffle — the
+  // baffle W/H are real design values, depth is the free variable.
+  const kabinet = useMemo(() => {
+    if (tab !== 'kabinet') return null
+    const iW = Math.max(50, design.baffleWidth - 2 * wallT)
+    const iH = Math.max(50, design.baffleHeight - 2 * wallT)
+    const iD = Math.max(50, (effVb / 1000) / ((iW / 1000) * (iH / 1000)) * 1000)
+    const axes = [
+      { label: 'Højde (indv.)', mm: iH },
+      { label: 'Bredde (indv.)', mm: iW },
+      { label: 'Dybde (indv., afledt af volumen)', mm: iD },
+    ].map((a) => ({ ...a, f1: standingWave(a.mm) }))
+    const mat = PANEL_MATERIALS[panelMat]
+    const baffle = evaluatePanel({
+      material: mat, thickness_mm: wallT, spanA_mm: iW, spanB_mm: iH,
+      braces, treatment: 'none', driverBearing: true,
+    })
+    const side = evaluatePanel({
+      material: mat, thickness_mm: wallT, spanA_mm: iD, spanB_mm: iH,
+      braces, treatment: 'none', driverBearing: false,
+    })
+    return { iW, iH, iD, axes, baffle, side }
+  }, [tab, design.baffleWidth, design.baffleHeight, effVb, wallT, panelMat, braces])
+
+  // CAD export spec (OpenSCAD/DXF) — deterministic estimated driver layout
+  const cutSpec: BaffleCutSpec | null = useMemo(() => {
+    const bands = design.bands.slice(0, design.ways)
+    const layout = defaultDriverLayout(bands, drivers, design.baffleWidth, design.baffleHeight)
+    if (!layout) return null
+    const port = design.cabinetType === 'ported'
+      ? defaultPortPosition(layout, design.portDiameter, design.baffleWidth)
+      : null
+    const side = Math.cbrt(effVb / 1000)
+    return {
+      projectName: projectName || 'speaker-design',
+      baffleWidthMm: design.baffleWidth,
+      baffleHeightMm: design.baffleHeight,
+      wallThicknessMm: wallT,
+      outerDepthMm: Math.round(side * 1000),
+      roundoverRadiusMm: design.roundoverRadius,
+      drivers: layout,
+      port,
+    }
+  }, [design, drivers, effVb, projectName, wallT])
 
   // Design versioning
   const projectKey = projectKeyFor(loadedProjectId, projectName)
@@ -569,11 +633,175 @@ export default function DesignDashboard() {
               >
                 ADAU / SigmaStudio
               </Button>
+              {cutSpec && (
+                <>
+                  <Button variant="secondary" onClick={() => downloadOpenScad(cutSpec)}>
+                    OpenSCAD
+                  </Button>
+                  <Button variant="secondary" onClick={() => downloadBaffleDxf(cutSpec)}>
+                    Baffel DXF
+                  </Button>
+                </>
+              )}
             </div>
             <p className="text-xs text-gray-500 mt-2">
               Byggeark-dimensioner her er kubisk skøn ud fra volumen — brug Kabinetdesign → Eksport for de præcise pladeudskæringer.
             </p>
           </Card>
+        </>
+      )}
+
+      {tab === 'kabinet' && kabinet && (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Card title="Kabinet — redigér direkte">
+              <div className="grid grid-cols-2 gap-3">
+                <Select
+                  label="Kabinettype"
+                  value={design.cabinetType}
+                  onChange={(v) => updateDesign({ cabinetType: v as CabinetType })}
+                  options={[
+                    { value: 'sealed', label: 'Lukket' },
+                    { value: 'ported', label: 'Ported (basrefleks)' },
+                    { value: 'passive_radiator', label: 'Passivmembran' },
+                    { value: 'bandpass4', label: 'Bandpass (4. orden)' },
+                    { value: 'transmission_line', label: 'Transmissionslinje' },
+                    { value: 'horn', label: 'Horn' },
+                    { value: 'open_baffle', label: 'Åben baffel' },
+                  ]}
+                />
+                <NumberInput label="Volumen" unit="L" value={Math.round(effVb * 10) / 10} min={1} step={1} onChange={(v) => setPort({ vb: v })} />
+                {design.cabinetType === 'ported' && (
+                  <>
+                    <NumberInput label="Tuning Fb" unit="Hz" value={Math.round(effFb * 10) / 10} min={15} step={0.5} onChange={(v) => setPort({ fb: v })} />
+                    <NumberInput label="Portdiameter" unit="mm" value={design.portDiameter} min={20} step={5} onChange={(v) => setPort({ diameter: v })} />
+                    <NumberInput label="Antal porte" value={design.numPorts} min={1} max={4} onChange={(v) => setPort({ numPorts: Math.max(1, Math.round(v)) })} />
+                  </>
+                )}
+                <NumberInput label="Bafflebredde" unit="mm" value={design.baffleWidth} min={100} step={10} onChange={(v) => updateDesign({ baffleWidth: v })} />
+                <NumberInput label="Bafflehøjde" unit="mm" value={design.baffleHeight} min={150} step={10} onChange={(v) => updateDesign({ baffleHeight: v })} />
+                <NumberInput label="Roundover" unit="mm" value={design.roundoverRadius} min={0} step={5} onChange={(v) => updateDesign({ roundoverRadius: v })} />
+              </div>
+              <p className="text-xs text-gray-500 mt-3">
+                Ændringer slår igennem i alle faner og i status øverst med det samme.
+                Fuld kabinetgeometri, alignments og 3D:{' '}
+                <button className="underline text-blue-600 dark:text-blue-400" onClick={() => navigate('/cabinet')}>Kabinetdesign →</button>
+              </p>
+            </Card>
+
+            <Card title="Stående bølger (indvendige mål)">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-500 border-b border-gray-200 dark:border-gray-700">
+                    <th className="py-1 pr-2">Akse</th>
+                    <th className="py-1 pr-2">Mål</th>
+                    <th className="py-1 pr-2">λ/2</th>
+                    <th className="py-1 pr-2">2×</th>
+                    <th className="py-1">3×</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {kabinet.axes.map((a) => (
+                    <tr key={a.label} className="border-b border-gray-100 dark:border-gray-800">
+                      <td className="py-1 pr-2">{a.label}</td>
+                      <td className="py-1 pr-2">{a.mm.toFixed(0)} mm</td>
+                      <td className="py-1 pr-2 font-medium">{a.f1.toFixed(0)} Hz</td>
+                      <td className="py-1 pr-2">{(2 * a.f1).toFixed(0)} Hz</td>
+                      <td className="py-1">{(3 * a.f1).toFixed(0)} Hz</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-xs text-gray-500 mt-3">
+                Halvbølge-resonanser mellem parallelle flader. Indvendig dybde er afledt
+                af volumen og baffelmål. Dæmpningsmateriale midt på aksen (trykmaksimum
+                for luften ved λ/2) dæmper første mode mest — undgå ens indvendige mål.
+              </p>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Card title="Panelresonans">
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <Select
+                  label="Materiale"
+                  value={panelMat}
+                  onChange={(v) => setPanelMat(v as PanelMaterialKey)}
+                  options={Object.values(PANEL_MATERIALS).map((m) => ({ value: m.key, label: m.name }))}
+                />
+                <NumberInput label="Pladetykkelse" unit="mm" value={wallT} min={9} max={38} step={1} onChange={(v) => setWallT(Math.max(9, Math.round(v)))} />
+                <NumberInput label="Braces pr. panel" value={braces} min={0} max={4} onChange={(v) => setBraces(Math.max(0, Math.round(v)))} />
+              </div>
+              {[
+                { label: 'Frontbaffel (bærer drivere)', r: kabinet.baffle },
+                { label: 'Sidepanel', r: kabinet.side },
+              ].map(({ label, r }) => (
+                <div key={label} className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800 last:border-0">
+                  <div>
+                    <div className="text-sm font-medium">{label}</div>
+                    <div className="text-xs text-gray-500">{r.note}</div>
+                  </div>
+                  <div className="text-right shrink-0 pl-3">
+                    <div className={`text-sm font-semibold ${r.verdict === 'good' ? 'text-green-600' : r.verdict === 'ok' ? 'text-amber-600' : 'text-red-600'}`}>
+                      {r.fundamentalHz.toFixed(0)} Hz
+                    </div>
+                    <div className="text-xs text-gray-500">Q {r.q.toFixed(0)} · {r.decayMs.toFixed(0)} ms</div>
+                  </div>
+                </div>
+              ))}
+              <p className="text-xs text-gray-500 mt-3">
+                Fundamental (1,1)-bøjningsresonans pr. felt mellem braces. Mål: over
+                ~300 Hz (380 Hz for driverbærende paneler) — flyt resonansen op med
+                tykkere plade eller flere braces frem for at jagte dæmpning alene.
+              </p>
+            </Card>
+
+            <Card title="CAD-eksport (baffeludskæring)">
+              {cutSpec ? (
+                <>
+                  <div className="flex items-center gap-2 flex-wrap mb-3">
+                    <Button variant="primary" onClick={() => downloadOpenScad(cutSpec)}>OpenSCAD (.scad)</Button>
+                    <Button variant="secondary" onClick={() => downloadBaffleDxf(cutSpec)}>Baffel DXF</Button>
+                  </div>
+                  <table className="w-full text-sm mb-2">
+                    <thead>
+                      <tr className="text-left text-gray-500 border-b border-gray-200 dark:border-gray-700">
+                        <th className="py-1 pr-2">Udskæring</th>
+                        <th className="py-1 pr-2">Ø</th>
+                        <th className="py-1">Center (x, y fra bund)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cutSpec.drivers.map((d) => (
+                        <tr key={d.label} className="border-b border-gray-100 dark:border-gray-800">
+                          <td className="py-1 pr-2">{d.label}</td>
+                          <td className="py-1 pr-2">{d.diameterMm.toFixed(0)} mm</td>
+                          <td className="py-1">({d.xMm.toFixed(0)}, {d.yMm.toFixed(0)}) mm</td>
+                        </tr>
+                      ))}
+                      {cutSpec.port && (
+                        <tr>
+                          <td className="py-1 pr-2">Port</td>
+                          <td className="py-1 pr-2">{cutSpec.port.diameterMm.toFixed(0)} mm</td>
+                          <td className="py-1">({cutSpec.port.xMm.toFixed(0)}, {cutSpec.port.yMm.toFixed(0)}) mm</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                  <p className="text-xs text-gray-500">
+                    Positioner er et deterministisk estimat (lodret stak på centerlinjen,
+                    diskant øverst) — alle mål ligger som variabler øverst i .scad-filen
+                    og kan redigeres frit. DXF er R12 (mm) til LibreCAD/Fusion/CNC.
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  Ingen drivere valgt, eller driver-stakken kan ikke være på baflen
+                  ({design.baffleWidth} × {design.baffleHeight} mm) — vælg drivere eller gør baflen større.
+                </p>
+              )}
+            </Card>
+          </div>
         </>
       )}
 

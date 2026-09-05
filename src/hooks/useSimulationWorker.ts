@@ -19,9 +19,10 @@ export interface SimWorkerInput {
   baffleHeight: number
   cabinetType: string
   portFb: number
-  portVb: number
   portDiameter: number
+  portVb: number
   numPorts: number
+  roundoverRadius?: number
 }
 
 export interface ProcessedBand {

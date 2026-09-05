@@ -13,6 +13,7 @@ import { ResponsivePlot } from '@/components/charts/ResponsivePlot'
 import { CrossoverSlider } from '@/components/CrossoverSlider'
 import { NextStep } from '@/components/NextStep'
 import { ImpedanceMatchCard } from '@/components/ImpedanceMatchCard'
+import { TargetSlopeCard } from '@/components/TargetSlopeCard'
 import type { CrossoverType, FrequencyDataPoint, DesignBand, Driver, Crossover, Cabinet, DesignState } from '@/types'
 
 const XOVER_TYPES: { value: CrossoverType; label: string }[] = [
@@ -547,6 +548,9 @@ function findClosestIndex(arr: number[], target: number): number {
         drivers={drivers}
       />
 
+      {/* Acoustic target slopes (SPEC §5.4) */}
+      <TargetSlopeCard design={design} drivers={drivers} updateBand={updateBand} />
+
       {/* Preview summary */}
       <Card title="Delingsfilter oversigt">
         <div className="space-y-2">
@@ -729,7 +733,7 @@ function ReverseNullCard({
         withDrivers, drivers, freqs,
         design.baffleWidth, design.baffleHeight,
         design.cabinetType, design.portFb ?? 0, design.portVb ?? 0,
-        design.portDiameter, design.numPorts,
+        design.portDiameter, design.numPorts, design.roundoverRadius,
       )
       if (processedBands.length < 2) return null
 

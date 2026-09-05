@@ -29,7 +29,7 @@ Reglen for afkrydsning: et punkt er først done når det er **implementeret, tes
 - [x] LR2/LR4/LR8, BW2/BW4, 1. orden + EQ (PEQ/shelf) (mk1-arv)
 - [x] Reverse-null-test i UI (Delingsfilter: polaritetsflip på valgt overgang med den delte fasebevidste summering, nul-dybde-vurdering ved XO-frekvensen)
 - [ ] Akustiske mål-slopes (elektrisk filter findes af optimizer for at ramme akustisk LR4)
-- [ ] Numerisk kantdiffraktion pr. vinkel (Vanderkooy) — nuværende er formel-approksimation
+- [x] Numerisk kantdiffraktion (Vanderkooy-stil edge-integral, on-axis): calcBaffleDiffraction med driverpositioner fra fælles baffle-layout (samme stak som CAD-eksport), Δθ-vægtede kantbidrag med faseforsinkelse → ripple + 6 dB-step i én model, roundover-dæmpning. I hele sim-stien (processBand/worker/optimizer/mål-slopes); fallback til shelf uden layout. Off-axis-diffraktion pr. vinkel udestår
 
 ## Fase 3 — Optimizer A/B/C
 - [x] C: Delefilter-optimizer (Harman/Olive-score, koordinat-descent, Joachim-regler: kun dæmpning, bånd 0 låst, XO-grænser fra driver-range) (mk1-arv)
@@ -45,7 +45,9 @@ Reglen for afkrydsning: et punkt er først done når det er **implementeret, tes
 - [x] Flow A "Jeg har et kabinet": 3 trin med ord-slidere → rangerede driverkort med score-ring, top 3-badge og "Hvorfor denne score?"-udfoldning (/wizard/cabinet)
 - [x] Flow B "Fra bunden": 4 trin (mål → enheder → kabinet → opsummering, /wizard/scratch) + "Jeg har enheder"-flow (/wizard/driver). Landing-indgangene peger nu på wizards
 - [x] Design-dashboard (/dashboard, fælles slutskærm — wizards lander her): status-badge Klar/Kræver opmærksomhed/Ikke realiserbar med årsag, samlede engine-advarsler for alle 7 kabinettyper med "Anvend"-knap + Fortryd (lib/designHealth.ts, testet), nøgletal (F3, maks-SPL ved valgbar referenceeffekt, 8-dels score), systemrespons-plot, eksport-række (byggeark/CamillaDSP/EqAPO)
-- [x] Dashboard-faner (Oversigt/Spinorama/Delefilter/Impedans/Excursion & port i selve dashboardet — spinorama/impedans/excursion beregnes lazy pr. fane på samme engine-kald som designHealth). Kabinet-fane (3D + stående bølger) + fuld inline-redigering udestår
+- [x] Dashboard-faner (Oversigt/Spinorama/Delefilter/Impedans/Excursion & port i selve dashboardet — spinorama/impedans/excursion beregnes lazy pr. fane på samme engine-kald som designHealth)
+- [x] Kabinet-fane i dashboardet: inline-redigering (kabinettype/Vb/Fb/port/baffelmål/roundover — slår igennem i alle faner), stående bølger pr. akse, panelresonans (materiale/tykkelse/braces, front + side), CAD-eksport med udskæringstabel. 3D bor fortsat i Kabinetdesign (link)
+- [x] Akustiske mål-slopes-kort i CrossoverDesigner (SPEC §5.4): akustisk LR2/BW4/LR4/LR8-mål → elektrisk filter fittes mod baffle-korrigeret råkurve (lib/acoustic/targetSlopes.ts, testet). Rører aldrig gain
 - [x] "Hvorfor ser det sådan ud?"-annotationslag (lib/annotations.ts, testet): bafflestep, kantdiffraktion, port/PR/bandpass-tuning, TL ¼-bølge, hornlængde, dipol-peak, delefrekvenser, F3 — lodrette markører + forklaringsliste på responsplottet
 - [x] Design-versionering (snapshots med parent_version, SPEC §3): IndexedDB v2 designVersions-tabel, Gem version/Gendan-kort i dashboardet, lineage-helpers testet
 

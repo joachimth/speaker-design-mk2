@@ -207,6 +207,7 @@ export default function SystemSimulation() {
     portVb: portVb ?? 0,
     portDiameter,
     numPorts,
+    roundoverRadius: design.roundoverRadius,
   })
 
   // Ref to skip auto-select when a handoff was just applied
@@ -828,6 +829,7 @@ export default function SystemSimulation() {
         portVb: portVb ?? 0,
         portDiameter,
         numPorts,
+        roundoverRadius: design.roundoverRadius,
       },
     })
   }

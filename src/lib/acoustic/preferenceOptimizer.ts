@@ -31,6 +31,8 @@ export interface OptimizationParams {
   portVb: number;
   portDiameter: number;
   numPorts: number;
+  /** Front-edge roundover radius [mm] — feeds the diffraction model */
+  roundoverRadius?: number;
   /** Max deviation from initial crossover freq (fraction, e.g. 0.5 = ±50%) */
   xoRangeFraction?: number;
   /** Max deviation from initial gain (dB) */
@@ -70,11 +72,12 @@ export function scoreFromBands(
   portVb: number,
   portDiameter: number,
   numPorts: number,
+  roundoverRadius: number = 0,
 ): PreferenceScoreResult {
   const { summed, bandCurves } = _simulateOnAxisWithBands(
     bands, drivers, freqs,
     baffleWidth, baffleHeight,
-    cabinetType, portFb, portVb, portDiameter, numPorts,
+    cabinetType, portFb, portVb, portDiameter, numPorts, roundoverRadius,
   );
 
   // Per-band directivity: each driver through its own piston diameter
@@ -158,6 +161,7 @@ export function optimizeForPreferenceScore(params: OptimizationParams): Optimiza
     portVb,
     portDiameter,
     numPorts,
+    roundoverRadius = 0,
     xoRangeFraction = 0.8,
     gainRangeDb = 15,
     maxDelayMs = 10,
@@ -182,7 +186,7 @@ export function optimizeForPreferenceScore(params: OptimizationParams): Optimiza
   const beforeScore = scoreFromBands(
     bands, drivers, freqs,
     baffleWidth, baffleHeight,
-    cabinetType, portFb, portVb, portDiameter, numPorts,
+    cabinetType, portFb, portVb, portDiameter, numPorts, roundoverRadius,
   );
 
   reasoning.push(`Start score: ${beforeScore.score}/10 (NBD_ON=${beforeScore.nbdOnAxis}, NBD_PIR=${beforeScore.nbdPredInRoom}, LFX=${beforeScore.lfxHz}Hz, SM_PIR=${beforeScore.smPredInRoom}).`);
@@ -256,7 +260,7 @@ export function optimizeForPreferenceScore(params: OptimizationParams): Optimiza
       const trialScore = scoreFromBands(
         trialBands, drivers, freqs,
         baffleWidth, baffleHeight,
-        cabinetType, portFb, portVb, portDiameter, numPorts,
+        cabinetType, portFb, portVb, portDiameter, numPorts, roundoverRadius,
       );
       if (trialScore.score > bestGridScore) {
         bestGridScore = trialScore.score;
@@ -285,7 +289,7 @@ export function optimizeForPreferenceScore(params: OptimizationParams): Optimiza
   bestScore = scoreFromBands(
     bestBands, drivers, freqs,
     baffleWidth, baffleHeight,
-    cabinetType, portFb, portVb, portDiameter, numPorts,
+    cabinetType, portFb, portVb, portDiameter, numPorts, roundoverRadius,
   ).score;
 
   // --- Phases 2-5: iterate until convergence ---
@@ -318,7 +322,7 @@ export function optimizeForPreferenceScore(params: OptimizationParams): Optimiza
       const trialScore = scoreFromBands(
         trialBands, drivers, freqs,
         baffleWidth, baffleHeight,
-        cabinetType, portFb, portVb, portDiameter, numPorts,
+        cabinetType, portFb, portVb, portDiameter, numPorts, roundoverRadius,
       );
       if (trialScore.score > bestScore + 0.005) {
         bestScore = trialScore.score;
@@ -376,7 +380,7 @@ export function optimizeForPreferenceScore(params: OptimizationParams): Optimiza
         const trialScore = scoreFromBands(
           trialBands, drivers, freqs,
           baffleWidth, baffleHeight,
-          cabinetType, portFb, portVb, portDiameter, numPorts,
+          cabinetType, portFb, portVb, portDiameter, numPorts, roundoverRadius,
         );
         if (trialScore.score > bestXoScore + 0.01) {
           bestXoScore = trialScore.score;
@@ -436,7 +440,7 @@ export function optimizeForPreferenceScore(params: OptimizationParams): Optimiza
         const trialScore = scoreFromBands(
           trialBands, drivers, freqs,
           baffleWidth, baffleHeight,
-          cabinetType, portFb, portVb, portDiameter, numPorts,
+          cabinetType, portFb, portVb, portDiameter, numPorts, roundoverRadius,
         );
         if (trialScore.score > bestGainScore + 0.005) {
           bestGainScore = trialScore.score;
@@ -481,7 +485,7 @@ export function optimizeForPreferenceScore(params: OptimizationParams): Optimiza
         const trialScore = scoreFromBands(
           trialBands, drivers, freqs,
           baffleWidth, baffleHeight,
-          cabinetType, portFb, portVb, portDiameter, numPorts,
+          cabinetType, portFb, portVb, portDiameter, numPorts, roundoverRadius,
         );
         if (trialScore.score > bestDelayScore + 0.005) {
           bestDelayScore = trialScore.score;
@@ -521,7 +525,7 @@ export function optimizeForPreferenceScore(params: OptimizationParams): Optimiza
   const afterScore = scoreFromBands(
     bestBands, drivers, freqs,
     baffleWidth, baffleHeight,
-    cabinetType, portFb, portVb, portDiameter, numPorts,
+    cabinetType, portFb, portVb, portDiameter, numPorts, roundoverRadius,
   );
 
   const improvement = afterScore.score - beforeScore.score;

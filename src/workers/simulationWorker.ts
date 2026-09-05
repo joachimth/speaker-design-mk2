@@ -8,7 +8,8 @@
 
 import { generateFrequencies } from '../lib/acoustic/thieleSmall'
 import { processBand, complexSum, type ProcessedBand } from '../lib/acoustic/simulateBands'
-import { calcBaffleStep, calcBaffleStepCompensation } from '../lib/acoustic/baffle'
+import { calcBaffleStep, calcBaffleStepCompensation, calcBaffleDiffraction } from '../lib/acoustic/baffle'
+import { layoutBandPositions } from '../lib/acoustic/baffleLayout'
 import type { Driver, FrequencyDataPoint, DesignBand } from '../types'
 
 export interface SimWorkerInput {
@@ -22,6 +23,7 @@ export interface SimWorkerInput {
   portVb: number
   portDiameter: number
   numPorts: number
+  roundoverRadius?: number
 }
 
 export interface SimWorkerOutput {
@@ -36,7 +38,7 @@ export interface SimWorkerOutput {
 }
 
 self.onmessage = (e: MessageEvent<SimWorkerInput>) => {
-  const { bands, drivers, ways, baffleWidth, baffleHeight, cabinetType, portFb, portVb, portDiameter, numPorts } = e.data
+  const { bands, drivers, ways, baffleWidth, baffleHeight, cabinetType, portFb, portVb, portDiameter, numPorts, roundoverRadius } = e.data
 
   const freqs = generateFrequencies(20, 20000, 12)
 
@@ -48,16 +50,26 @@ self.onmessage = (e: MessageEvent<SimWorkerInput>) => {
   const baffleComp = calcBaffleStepCompensation(fStep, baffleCompDb, freqs)
 
   const activeBands = bands.slice(0, ways)
+
+  // Position-aware edge diffraction (same layout as CAD export)
+  const positions = layoutBandPositions(activeBands, drivers, baffleWidth, baffleHeight)
+
   const processedBands: ProcessedBand[] = []
 
-  for (const band of activeBands) {
+  for (let bi = 0; bi < activeBands.length; bi++) {
+    const band = activeBands[bi]!
     const driver = drivers.find((d) => d.id === band.driverId)
+    const pos = positions?.find((p) => p.bandIndex === bi)
+    const diffractionDb = pos
+      ? calcBaffleDiffraction(baffleWidth, baffleHeight, pos.xMm, pos.yMm, roundoverRadius ?? 0, freqs)
+      : undefined
     const result = processBand(
       band, driver, freqs,
       baffleStepResult, baffleComp,
       fStep, fStep3x,
       cabinetType, portFb, portVb, portDiameter, numPorts,
       baffleWidth,
+      diffractionDb,
     )
     if (!result) continue
     processedBands.push({

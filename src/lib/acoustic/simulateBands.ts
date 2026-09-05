@@ -28,7 +28,8 @@ import {
   type BiquadCoeffs,
 } from './crossover';
 import { calcCabinetResponse } from './cabinetResponse';
-import { calcBaffleStep, calcBaffleStepCompensation } from './baffle';
+import { calcBaffleStep, calcBaffleStepCompensation, calcBaffleDiffraction } from './baffle';
+import { layoutBandPositions } from './baffleLayout';
 import { pistonDiameter, acousticCenterDepth } from './autoDesign';
 
 export const SHARED_SAMPLE_RATE = 48000;
@@ -92,6 +93,7 @@ export function processBand(
   portDiameter: number,
   numPorts: number,
   baffleWidth: number = 300,
+  diffractionDb?: number[] | null,
 ): { curve: FrequencyDataPoint[]; filters: BandFilters; hasRealResponse: boolean } | null {
   if (!driver) return null;
 
@@ -133,7 +135,21 @@ export function processBand(
     }));
   }
 
-  if (isLowDriver || isMidDriver) {
+  if (diffractionDb) {
+    // Position-aware edge diffraction (applies to ALL driver types — the
+    // ripple in the tweeter range is exactly what placement changes).
+    // Baffle step compensation keeps its old role: an assumed electrical
+    // low-shelf boost on bass (full) and mid (below 3×fStep) channels.
+    curve = curve.map((p, i) => {
+      const dif = diffractionDb[i] ?? 0;
+      let compFactor = isLowDriver || isMidDriver ? (baffleComp[i] ?? 0) : 0;
+      if (isMidDriver && p.freq > fStep3x) {
+        const t = Math.min(1, (p.freq - fStep) / (fStep3x - fStep));
+        compFactor *= (1 - t);
+      }
+      return { freq: p.freq, magnitude: p.magnitude + dif + compFactor };
+    });
+  } else if (isLowDriver || isMidDriver) {
     curve = curve.map((p, i) => {
       let bsFactor = baffleStepResult.response[i] ?? 0;
       let compFactor = baffleComp[i] ?? 0;
@@ -231,6 +247,7 @@ export function simulateOnAxisWithBands(
   portVb: number,
   portDiameter: number,
   numPorts: number,
+  roundoverRadius: number = 0,
 ): { summed: FrequencyDataPoint[]; bandCurves: BandCurveData[]; processedBands: ProcessedBand[] } {
   const baffleStepResult = calcBaffleStep(baffleWidth, baffleHeight, freqs);
   const fStep = 343000 / (2 * baffleWidth);
@@ -238,16 +255,27 @@ export function simulateOnAxisWithBands(
   const baffleCompDb = Math.abs(baffleStepResult.response[0] ?? 6);
   const baffleComp = calcBaffleStepCompensation(fStep, baffleCompDb, freqs);
 
+  // Estimated driver positions (same layout as the CAD export) drive the
+  // position-aware edge-diffraction model. Falls back to the generic shelf
+  // when the stack does not fit / no drivers are matched.
+  const positions = layoutBandPositions(bands, drivers, baffleWidth, baffleHeight);
+
   const processedBands: ProcessedBand[] = [];
 
-  for (const band of bands) {
+  for (let bi = 0; bi < bands.length; bi++) {
+    const band = bands[bi]!;
     const driver = drivers.find((d) => d.id === band.driverId);
+    const pos = positions?.find((p) => p.bandIndex === bi);
+    const diffractionDb = pos
+      ? calcBaffleDiffraction(baffleWidth, baffleHeight, pos.xMm, pos.yMm, roundoverRadius, freqs)
+      : undefined;
     const result = processBand(
       band, driver, freqs,
       baffleStepResult, baffleComp,
       fStep, fStep3x,
       cabinetType, portFb, portVb, portDiameter, numPorts,
       baffleWidth,
+      diffractionDb,
     );
     if (!result) continue;
     processedBands.push({
@@ -283,8 +311,9 @@ export function simulateOnAxis(
   portVb: number,
   portDiameter: number,
   numPorts: number,
+  roundoverRadius: number = 0,
 ): FrequencyDataPoint[] {
-  return simulateOnAxisWithBands(bands, drivers, freqs, baffleWidth, baffleHeight, cabinetType, portFb, portVb, portDiameter, numPorts).summed;
+  return simulateOnAxisWithBands(bands, drivers, freqs, baffleWidth, baffleHeight, cabinetType, portFb, portVb, portDiameter, numPorts, roundoverRadius).summed;
 }
 
 // Re-export for backward compatibility
