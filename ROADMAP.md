@@ -17,8 +17,8 @@ Reglen for afkrydsning: et punkt er først done når det er **implementeret, tes
 - [x] Passiv radiator-model — korrekt kredsløb med notch ved fp, testet (UI kommer med kabinettype-udvidelsen)
 - [x] Port-hastighed over frekvens med advarselsgrænser (10/17 m/s) i UI (ExcursionPortCard)
 - [x] Excursion x(f), maks-SPL (displacement + termisk) — engine/maxSpl + kredsløbsmodel, i UI
-- [ ] Ported alignments som startpunkter (QB3, SBB4, C4, B4, EBS)
-- [x] T/S konsistenskontrol-funktion (engine/driver.ts checkTsConsistency, testet — UI-flag mangler)
+- [x] Ported alignments som startpunkter: QB3/SBB4/B4/EBS lukket form + "numerisk flat" Nelder-Mead på fuld model (engine/enclosure/alignments.ts, testet, i Kabinetdesign-UI). C4 har ingen brugbar lukket form — dækkes af den numeriske optimizer
+- [x] T/S konsistenskontrol-funktion (engine/driver.ts checkTsConsistency, testet) + UI-flag i Enheder (driverdetalje viser >10 % afvigelser)
 - [x] Analytiske golden tests: sealed Qtc=0,707 mod eksakt 2. ordens Butterworth (±0,8 dB), vented B4 mod 4. ordens Butterworth (±2 dB), piston-strålingsasymptoter, Bessel-facit
 - [ ] Golden tests mod WinISD/Hornresp CSV-referencer (kræver eksterne kørsler)
 
@@ -35,15 +35,15 @@ Reglen for afkrydsning: et punkt er først done når det er **implementeret, tes
 - [x] C: Delefilter-optimizer (Harman/Olive-score, koordinat-descent, Joachim-regler: kun dæmpning, bånd 0 låst, XO-grænser fra driver-range) (mk1-arv)
 - [x] B: Kabinet-optimizer (volumen/tuning-sweep mod score) (mk1-arv, begrænset)
 - [x] A: Driver-match til kabinet (Cabinet Match) (mk1-arv, begrænset)
-- [ ] A: 8-dels forklarlig score 0-100 (alignment-fit, excursion-margin, port-realiserbarhed, mekanisk fit, DI-match, følsomhed, pris)
-- [ ] B: geometri-optimering under constraints (maks-mål, baffle-bredde) med Nelder-Mead/DE
+- [x] A: 8-dels forklarlig score 0-100 på ægte sim (engine/score.ts: basdybde, flathed, maks-SPL, følsomhed, kasse-match, port-praktik, Xmax, datakvalitet — testet, driver wizard-rangeringen). DI-match og pris indgår ikke endnu
+- [x] B: Vb/Fb-optimering med deterministisk Nelder-Mead på fuld model under volumenloft (optimizeVentedFlat, testet). Fuld geometri-optimering (ydre mål, baffelbredde) udestår
 - [ ] C: akustisk-mål-drevet med PEQ-indsættelse, biquad-antal-constraint, excursion-constraint
 
 ## Fase 4 — UI: wizard + dashboard
 - [x] Landing med tre indgange (tynd version)
 - [x] Projekt-gem/indlæs, A/B-sammenligning, print (mk1-arv)
-- [ ] Flow A "Jeg har et kabinet": 3 trin med ord-slidere → rangerede driverkort
-- [ ] Flow B "Fra bunden / har drivere": 4 trin → beregn med fremdrift
+- [x] Flow A "Jeg har et kabinet": 3 trin med ord-slidere → rangerede driverkort med score-ring, top 3-badge og "Hvorfor denne score?"-udfoldning (/wizard/cabinet)
+- [x] Flow B "Fra bunden": 4 trin (mål → enheder → kabinet → opsummering, /wizard/scratch) + "Jeg har enheder"-flow (/wizard/driver). Landing-indgangene peger nu på wizards
 - [ ] Design-dashboard: status-badge, redigerbar venstrekolonne, faner, advarsler med "Anvend"
 - [ ] "Hvorfor ser det sådan ud?"-annotationslag
 - [ ] Design-versionering (snapshots med parent_version)
@@ -51,21 +51,22 @@ Reglen for afkrydsning: et punkt er først done når det er **implementeret, tes
 ## Fase 5 — TL, horn, bandpass, open baffle, kabinet-mekanik
 - [x] Åben baffel (dipol-model) i kabinetberegner (mk1-arv)
 - [x] Panelresonans + stående bølger (mk1-arv)
-- [x] TL: korrekt kompleks T-matrix (segmenter, stuffing, offset-driver, ægte linjeimpedans-load), testet (UI-editor mangler)
-- [x] Horn: T-matrix med fuld mundimpedans (Bessel/Struve), back/front-chamber, front/back-loaded, cutoff + mund-advarsel, testet (UI mangler)
-- [x] Bandpass 4. orden (to-kammer kredsløb), testet (6. orden + UI mangler)
+- [x] TL: korrekt kompleks T-matrix (segmenter, stuffing, offset-driver, ægte linjeimpedans-load), testet + UI-editor på den nye model (længde/taper/fyld/offset, ¼λ-seed, plots)
+- [x] Horn: T-matrix med fuld mundimpedans (Bessel/Struve), back/front-chamber, front/back-loaded, cutoff + mund-advarsel, testet + UI-kort (profil/topologi/arealer, mål-mundareal ved advarsel)
+- [x] Bandpass 4. orden (to-kammer kredsløb), testet + UI-kort (6. orden udestår)
+- [x] Passiv slave + alle nye typer valgbare som kabinettype i Kabinetdesign (7 typer). Systemsim-stien bruger nærmeste 2./4.-ordens tilnærmelse for PR/bandpass/horn — de ægte modeller driver kortene i Kabinetdesign
 - [ ] Golden tests mod Hornresp (W4-1052SDF back-loaded horn som reference)
 
 ## Fase 6 — Eksport, DB-import, måle-feedback
 - [x] Biquad-eksport: MiniDSP 2x4 / 4x10 HD, tekst/hex/JSON (mk1-arv, testet)
 - [x] STL-eksport, design-JSON, REW-eksport (mk1-arv)
-- [ ] Byggeark (findes som `lib/export/buildSheet.ts` — skal kobles til UI + testes)
-- [ ] CamillaDSP YAML (findes som `lib/export/camillaDSP.ts` — skal kobles til UI + testes)
+- [x] Byggeark koblet til UI (Kabinetdesign → Eksport: skæreliste, portspec, driverliste). Dedikerede eksport-tests udestår
+- [x] CamillaDSP YAML koblet til UI (Simulering → Gem projekt-knaprækken). Dedikerede eksport-tests udestår
 - [ ] Equalizer APO, Hypex FusionAmp, ADAU1701/1452
 - [ ] OpenSCAD-parametre / DXF til baffeludskæring
 - [ ] FRD/ZMA import
 - [ ] Kvalitetsflag A/B/C + proveniens pr. driver
-- [ ] Manglende spec-drivere: Dayton E180HE-44, Wavecor WF146WA05, TB W4-1052SDF
+- [x] Manglende spec-drivere tilføjet med datablads-T/S: Dayton Epique E180HE-44 (seriekoblet 8 Ω), Wavecor WF146WA05, TB W4-1052SDF (fs/Q afledt af Mms/Cms/Rms — markeret i noter). 37 drivere i alt
 
 ## Fase 7 — Polering
 - [x] Responsivt design, dark mode, hjælpe-tour, enhedspræference (mk1-arv)

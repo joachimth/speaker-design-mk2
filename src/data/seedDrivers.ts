@@ -1654,6 +1654,74 @@ export const SEED_DRIVERS: Driver[] = [
     updatedAt: Date.now(),
   },
 
+  // ===== SPEC §6 startpopulation (tilføjet Fase C, Sep 2026) =====
+
+  // Dayton Epique E180HE-44 — 7" DVC high-excursion subwoofer (SPEC §6).
+  // Datasheet values (Parts Express spec sheet 295-104), coils in SERIES → 8 Ω.
+  {
+    id: 'seed-dayton-e180he-44',
+    manufacturer: 'Dayton Audio',
+    model: 'Epique E180HE-44',
+    type: 'subwoofer',
+    tsParams: {
+      fs: 35, re: 6.8, qms: 2.93, qes: 0.54, qts: 0.46, vas: 16.1,
+      cms: 0.61, mms: 32.5, bl: 9.6, sensitivity: 83.8, xmax: 14.7,
+      sd: 136.1, sdM2: 0.01361, vd: 2001, le: 1.5, pe: 200, imp: 8,
+    },
+    dimensions: {
+      overallDiameter: 181, cutoutDiameter: 155, mountingDepth: 111,
+      magnetDiameter: 125, magnetDepth: 45, weight: 2900,
+    },
+    datasheetUrl: 'https://www.parts-express.com/pedocs/specs/295-104--epique-e180he-44-spec-sheet.pdf',
+    notes: 'DVC 4+4 Ω (her: seriekoblet → 8 Ω, Re 6,8). Ekstrem Xmax 14,7 mm til str. — kompakt lukket/PR-sub. Parallelkobling giver 2 Ω-variant (halvér Re/Le, BL uændret pr. definitionen — opret separat parametersæt hvis brugt). Datablad-proveniens.',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+
+  // Wavecor WF146WA05 — 5.75" glasfiber mid-woofer (SPEC §6).
+  // Datasheet values (Wavecor/Parts Express 298-1168).
+  {
+    id: 'seed-wavecor-wf146wa05',
+    manufacturer: 'Wavecor',
+    model: 'WF146WA05',
+    type: 'woofer',
+    tsParams: {
+      fs: 41, re: 3.2, qms: 8.2, qes: 0.41, qts: 0.39, vas: 15.0,
+      cms: 1.22, mms: 12.5, bl: 5.0, sensitivity: 88.5, xmax: 3.0,
+      sd: 93, sdM2: 0.0093, vd: 279, le: 0.24, pe: 55, imp: 4,
+    },
+    dimensions: {
+      overallDiameter: 146, cutoutDiameter: 123, mountingDepth: 66,
+      magnetDiameter: 90, magnetDepth: 35, weight: 1100,
+    },
+    datasheetUrl: 'https://www.parts-express.com/Wavecor-WF146WA05-5-3-4-Glass-Fiber-Cone-Mid-Woofer-4-Ohm-298-1168',
+    notes: '5,75" mid-woofer, lav Le (0,24 mH) og flad respons — klassisk 2-vejs partner til en blød dome. QB3 ~11 L / F3 ~50 Hz eller lukket ~7 L Qtc 0,7. Datablad-proveniens.',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+
+  // Tang Band W4-1052SDF — 4" bambus full-range (SPEC §6 + §11: reference-
+  // driver for Joachims back-loaded horn / Hornresp golden-validering).
+  {
+    id: 'seed-tb-w4-1052sdf',
+    manufacturer: 'Tang Band',
+    model: 'W4-1052SDF',
+    type: 'fullrange',
+    tsParams: {
+      fs: 70, re: 3.8, qms: 4.8, qes: 0.46, qts: 0.42, vas: 5.2,
+      cms: 1.13, mms: 4.61, bl: 4.1, sensitivity: 88, xmax: 2.6,
+      sd: 57, sdM2: 0.0057, vd: 148, le: 0.077, pe: 20, imp: 4,
+    },
+    dimensions: {
+      overallDiameter: 116, cutoutDiameter: 93, mountingDepth: 55,
+      magnetDiameter: 80, magnetDepth: 30, weight: 700,
+    },
+    datasheetUrl: 'https://www.tb-speaker.com/products/w4-1052sdf',
+    notes: '4" full-range (bambus-kegle). Referencedriver for back-loaded horn (SPEC §11, Hornresp-golden udestår). Fs/Qms/Qes er AFLEDT af Mms/Cms/Rms fra databladet (fs = 1/2π√(Mms·Cms) ≈ 70 Hz) — flag: afledt proveniens. BLH-startpunkt: hals ≈ 0,7×Sd, mund ≈ 6-8×Sd, 2,2-2,6 m linje, 5-7 L bagkammer.',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+
   // ===== DATS-Measured parameter sets (Jul 25-26, 2026) =====
   // Archived in parameterSets on the parent seed drivers above.
   // Standalone DATS entries removed in favor of in-driver parameter set switching.

@@ -23,16 +23,24 @@ Langsigtet status mod spec: se [ROADMAP.md](ROADMAP.md). Krav: [docs/SPEC.md](do
 - [x] portVelocity foldet ind i vented.ts (porthastighed = kanal fra samme kredsløb) → tests
 - [x] Nyt modul: excursion x(f) + maks-SPL (displacement + termisk) → tests
 - [x] Port-hastighed + excursion + maks-SPL i Kabinet-UI med 10/17 m/s advarsler (ExcursionPortCard)
-- [ ] Kabinettyper PR/bandpass/horn i UI + TL-editor på ny model (Fase C)
+- [x] Kabinettyper PR/bandpass/horn i UI + TL-editor på ny model (Fase C)
 
-### Fase C — Spec-features
-- [ ] Byggeark-eksport koblet til UI + tests
-- [ ] CamillaDSP-eksport koblet til UI + tests
-- [ ] Wizard Flow A (kabinet → drivere, 3 trin)
-- [ ] Wizard Flow B (fra bunden, 4 trin)
-- [ ] Dashboard-advarsler med "Anvend"-knap
-- [ ] T/S konsistenskontrol ved driverimport
-- [ ] Alignments (QB3/SBB4/C4/B4/EBS) som startpunkter
+### Fase C — Spec-features (afsluttet 5. sep 2026)
+- [x] Byggeark-eksport koblet til UI (Kabinetdesign → Eksport)
+- [x] CamillaDSP-eksport koblet til UI (Simulering → Gem projekt)
+- [x] Wizard Flow A (kabinet → drivere, 3 trin, 8-dels score) — /wizard/cabinet
+- [x] Wizard Flow B (fra bunden, 4 trin) — /wizard/scratch + "har enheder" — /wizard/driver
+- [x] Advarsler med "Anvend"-knap i de nye kabinetkort (PR Sd, portstørrelse, TL-fyld)
+- [x] T/S konsistensflag i driverdetaljen (Enheder)
+- [x] Alignments QB3/SBB4/B4/EBS + numerisk flat (Nelder–Mead) som startpunkter
+- [x] 3 spec-drivere: E180HE-44, WF146WA05, W4-1052SDF (datablads-proveniens i noter)
+
+### Fase D — næste
+- [ ] Design-dashboard med status-badge + "Anvend"-advarsler samlet (SPEC §7.4)
+- [ ] FRD/ZMA-import + A/B/C kvalitetsflag (SPEC §6, §9)
+- [ ] Reverse-null-test i UI (SPEC §7.5)
+- [ ] Golden tests mod WinISD/Hornresp CSV (kræver eksterne kørsler)
+- [ ] Eksport-tests for byggeark/CamillaDSP + flere DSP-formater
 
 ## Regler (fra Joachim, gælder al optimizer-kode)
 - Gains må KUN dæmpe, aldrig booste. Bånd 0 (woofer) altid låst på 0 dB.

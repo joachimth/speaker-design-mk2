@@ -14,8 +14,8 @@ Kravgrundlaget er [docs/SPEC.md](docs/SPEC.md) (fuld UX-, arkitektur- og fysikmo
 
 mk2 bygger på den fulde mk1-kodebase (315 tests) og er under aktiv udbygning mod spec'en. Det betyder:
 
-- **Virker i dag:** komplet 2/3/4-vejs simulering med komplekse overføringsfunktioner, CEA-2034 spinorama, Harman/Olive preference-score, auto-optimizer (kun dæmpning, bånd 0 låst), EQ-filtre, biquad-eksport (MiniDSP 2x4 / 4x10 HD), kabinetberegner (sealed/ported/TL/åben baffel), 3D-kabinetbygger + STL, OS waveguide-designer, PDF/graf-digitizer, 34 drivere med målte kurver, projekt-gem/indlæs, A/B-sammenligning.
-- **Under opbygning (se ROADMAP):** headless fysikmotor i `src/engine/` (TL/horn/bandpass/PR/port-hastighed), excursion & maks-SPL, wizard-flows, byggeark- og CamillaDSP-eksport, golden tests.
+- **Virker i dag:** komplet 2/3/4-vejs simulering med komplekse overføringsfunktioner, CEA-2034 spinorama, Harman/Olive preference-score, auto-optimizer (kun dæmpning, bånd 0 låst), EQ-filtre, biquad-eksport (MiniDSP 2x4 / 4x10 HD) + CamillaDSP YAML + byggeark, wizard-flows for alle tre indgange (kabinet→drivere med 8-dels forklarlig score, drivere→kabinet, fra bunden), kabinetberegner med **7 kabinettyper** (lukket/ported/passiv slave/bandpass/TL/horn/åben baffel) på den ægte lumped-element/T-matrix-motor, alignment-startpunkter (QB3/SBB4/B4/EBS + numerisk flat-optimering), excursion/porthastighed/maks-SPL, T/S-konsistensflag, 3D-kabinetbygger + STL, OS waveguide-designer, PDF/graf-digitizer, 37 drivere, projekt-gem/indlæs, A/B-sammenligning. 374 tests.
+- **Under opbygning (se ROADMAP):** FRD/ZMA-import, A/B/C kvalitetsflag, reverse-null i UI, design-dashboard med versionering, golden tests mod WinISD/Hornresp-CSV, flere DSP-eksportformater.
 
 ## Arkitektur (mål jf. SPEC §2)
 

@@ -84,7 +84,52 @@ export interface Driver {
 // Cabinet
 // ---------------------------------------------------------------------------
 
-export type CabinetType = 'sealed' | 'ported' | 'transmission_line' | 'open_baffle';
+export type CabinetType =
+  | 'sealed'
+  | 'ported'
+  | 'passive_radiator'
+  | 'bandpass4'
+  | 'transmission_line'
+  | 'horn'
+  | 'open_baffle';
+
+/** Passive radiator cabinet parameters (SPEC §4.4) */
+export interface PassiveRadiatorParams {
+  vb: number;      // Box volume [L]
+  fp: number;      // PR free-air resonance incl. added mass [Hz]
+  sdp: number;     // PR effective area [cm²]
+  vap: number;     // PR equivalent compliance volume [L]
+  qmp: number;     // PR mechanical Q
+  xmaxPr: number;  // PR max linear excursion [mm]
+}
+
+/** 4th-order bandpass cabinet parameters (SPEC §4.5) */
+export interface Bandpass4Params {
+  vRear: number;        // Sealed rear chamber [L]
+  vFront: number;       // Ported front chamber [L]
+  fbFront: number;      // Front chamber tuning [Hz]
+  portDiameter: number; // [mm]
+  numPorts: number;
+}
+
+/** Horn cabinet parameters (SPEC §4.7) */
+export interface HornDesignParams {
+  profile: 'exponential' | 'conical' | 'tractrix' | 'hyperbolic';
+  topology: 'front' | 'back';
+  throatAreaCm2: number;
+  mouthAreaCm2: number;
+  lengthM: number;
+  rearChamberLiters: number;
+}
+
+/** Transmission line geometry for the complex T-matrix model (SPEC §4.6) */
+export interface TLDesignParams {
+  lengthM: number;          // Total line length [m]
+  areaStartCm2: number;     // Cross-section at the driver end [cm²]
+  areaEndCm2: number;       // Cross-section at the terminus [cm²]
+  stuffingDensity: number;  // [kg/m³] (0 = empty, 5–10 light, 15–30 heavy)
+  driverOffsetFraction: number; // 0 = closed end, 0.2–0.35 typical ML-TL
+}
 
 export interface CabinetDimensions {
   width: number;    // [mm]
@@ -208,6 +253,11 @@ export interface DesignState {
   portVb: number | null;
   portDiameter: number;
   numPorts: number;
+  /** Parameters for the advanced cabinet types (optional, persisted with projects) */
+  prParams?: PassiveRadiatorParams;
+  bandpassParams?: Bandpass4Params;
+  hornParams?: HornDesignParams;
+  tlParams?: TLDesignParams;
 }
 
 // ---------------------------------------------------------------------------

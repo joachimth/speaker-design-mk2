@@ -9,6 +9,9 @@ import { LandingPage } from './pages/LandingPage'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 const CabinetMatch = lazy(() => import('./pages/CabinetMatch'))
 const DesignCompare = lazy(() => import('./pages/DesignCompare'))
+const WizardCabinet = lazy(() => import('./pages/WizardCabinet'))
+const WizardDriver = lazy(() => import('./pages/WizardDriver'))
+const WizardScratch = lazy(() => import('./pages/WizardScratch'))
 const WaveguideDesigner = lazy(() => import('./components/WaveguideDesigner').then(m => ({ default: m.WaveguideDesigner })))
 import { useDriverStore } from './store/driverStore'
 import { useDesignStore } from '@/store/designStore';
@@ -194,6 +197,9 @@ export default function App() {
           <Route path="/drivers" element={<DriverManager />} />
           <Route path="/cabinet" element={<CabinetDesigner />} />
           <Route path="/match" element={<Suspense fallback={<div className="p-8 text-center text-gray-500">Indlæser...</div>}><CabinetMatch /></Suspense>} />
+          <Route path="/wizard/cabinet" element={<Suspense fallback={<div className="p-8 text-center text-gray-500">Indlæser...</div>}><WizardCabinet /></Suspense>} />
+          <Route path="/wizard/driver" element={<Suspense fallback={<div className="p-8 text-center text-gray-500">Indlæser...</div>}><WizardDriver /></Suspense>} />
+          <Route path="/wizard/scratch" element={<Suspense fallback={<div className="p-8 text-center text-gray-500">Indlæser...</div>}><WizardScratch /></Suspense>} />
           <Route path="/crossover" element={<CrossoverDesigner />} />
           <Route path="/simulation" element={<Navigate to="/system" replace />} />
           <Route path="/system" element={<SystemSimulation />} />

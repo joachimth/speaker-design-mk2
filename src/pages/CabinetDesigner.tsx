@@ -17,17 +17,34 @@ import {
   calcSealed,
   calcPorted,
   calcPort,
-  calcTransmissionLine,
   recommendCabinetType,
   calcInternalVolume,
 } from '@/lib/acoustic/thieleSmall'
 import { suggestCabinet, suggestBaffle } from '@/lib/acoustic/autoDesign'
-import type { CabinetType, Driver } from '@/types'
+import {
+  AlignmentPickerCard,
+  PassiveRadiatorCard,
+  Bandpass4Card,
+  HornCard,
+  TransmissionLineCard,
+} from '@/components/EnclosureCards'
+import { downloadBuildSheet } from '@/lib/export/buildSheet'
+import type { CabinetType, Driver, DesignBand } from '@/types'
+
+const CABINET_TYPE_LABELS: Record<CabinetType, string> = {
+  sealed: 'Lukket',
+  ported: 'Ported',
+  passive_radiator: 'Passiv slave',
+  bandpass4: 'Bandpass',
+  transmission_line: 'Trans. linje',
+  horn: 'Horn',
+  open_baffle: 'Åben baffel',
+}
 
 export default function CabinetDesigner() {
   const { drivers, updateDriver } = useDriverStore()
   const { units } = useSettingsStore()
-  const { design, setCabinetType, setBaffle, setPort, updateDesign } = useDesignStore()
+  const { design, projectName, setCabinetType, setBaffle, setPort, updateDesign } = useDesignStore()
 
   const [selectedDriverId, setSelectedDriverId] = useState<string>(drivers[0]?.id || '')
   const [activeParameterSet, setActiveParameterSet] = useState<string>('Datablad')
@@ -137,6 +154,24 @@ export default function CabinetDesigner() {
   // not yet available when the initial selectedDriverId state is captured
   const selectedDriver = drivers.find((d) => d.id === selectedDriverId) ?? drivers[0]
 
+  // Build sheet export (SPEC §9): cut list + port spec + driver list
+  function handleBuildSheet() {
+    const bandsWithDrivers = design.bands
+      .map((band) => ({ band, driver: drivers.find((d) => d.id === band.driverId) }))
+      .filter((x): x is { band: DesignBand; driver: Driver } => !!x.driver)
+    downloadBuildSheet({
+      projectName: projectName || 'Uden navn',
+      cabinetType: CABINET_TYPE_LABELS[cabinetType],
+      dims: { ...cabinetDims },
+      internalVolume,
+      portSpec:
+        cabinetType === 'ported' && portResult
+          ? { shape: 'round', diameter: portDiameter, length: portResult.portLength, count: numPorts }
+          : undefined,
+      bands: bandsWithDrivers,
+    })
+  }
+
   const recommendation = useMemo(() => {
     if (!selectedDriver?.tsParams?.qts) return null
     return recommendCabinetType(selectedDriver.tsParams)
@@ -152,15 +187,15 @@ export default function CabinetDesigner() {
     return calcPorted(selectedDriver.tsParams)
   }, [selectedDriver])
 
+  // Effective Vb/Fb: user/alignment override from the design store wins,
+  // otherwise the auto suggestion from calcPorted (SPEC §4.4)
+  const effVb = design.portVb ?? portedResult?.vb ?? 30
+  const effFb = design.portFb ?? portedResult?.fb ?? 35
+
   const portResult = useMemo(() => {
     if (!portedResult) return null
-    return calcPort(portedResult.vb, portedResult.fb, portDiameter, numPorts)
-  }, [portedResult, portDiameter, numPorts])
-
-  const tlResult = useMemo(() => {
-    if (!selectedDriver?.tsParams) return null
-    return calcTransmissionLine(selectedDriver.tsParams)
-  }, [selectedDriver])
+    return calcPort(effVb, effFb, portDiameter, numPorts)
+  }, [portedResult, effVb, effFb, portDiameter, numPorts])
 
   const internalVolume = useMemo(() => {
     return calcInternalVolume(
@@ -229,18 +264,18 @@ export default function CabinetDesigner() {
       {/* Cabinet type selector */}
       <Card title="Kabinettype">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {(['sealed', 'ported', 'transmission_line', 'open_baffle'] as CabinetType[]).map((type) => (
+          {(Object.keys(CABINET_TYPE_LABELS) as CabinetType[]).map((type) => (
             <button
               key={type}
               onClick={() => setCabinetType(type)}
-              aria-label={`Kabinet type: ${type === 'sealed' ? 'Lukket' : type === 'ported' ? 'Med port' : type === 'transmission_line' ? 'Transmissionslinje' : 'Ren baffel'}`}
+              aria-label={`Kabinet type: ${CABINET_TYPE_LABELS[type]}`}
               className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                 cabinetType === type
                   ? 'bg-brand-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'
               }`}
             >
-              {type === 'sealed' ? 'Sealed' : type === 'ported' ? 'Ported' : type === 'transmission_line' ? 'Trans. Line' : 'Åben baffel'}
+              {CABINET_TYPE_LABELS[type]}
             </button>
           ))}
         </div>
@@ -339,33 +374,52 @@ export default function CabinetDesigner() {
         </Card>
       )}
 
+      {cabinetType === 'ported' && selectedDriver?.tsParams && (
+        <AlignmentPickerCard
+          driver={selectedDriver}
+          currentVb={effVb}
+          currentFb={effFb}
+          onApply={(vb, fb) => setPort({ vb, fb })}
+        />
+      )}
+
       {cabinetType === 'ported' && portedResult && portResult && (
         <Card title="Ported alignment">
           <div className="space-y-3">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <StatCard label="Vb" value={formatVolume(portedResult.vb, units, 1).split(' ')[0]} unit={formatVolume(portedResult.vb, units, 1).split(' ')[1]!} />
-              <StatCard label="Fb (tuning)" value={portedResult.fb.toFixed(1)} unit="Hz" />
-              <StatCard label="F3" value={portedResult.f3?.toFixed(1) || '—'} unit="Hz" />
-              <StatCard label="Alignment" value={portedResult.alignmentType} />
+              <NumberInput label="Vb (volumen)" unit="L" value={Math.round(effVb * 10) / 10} min={1} onChange={(v) => setPort({ vb: v })} />
+              <NumberInput label="Fb (tuning)" unit="Hz" value={Math.round(effFb * 10) / 10} min={15} onChange={(v) => setPort({ fb: v })} />
+              <StatCard label="F3 (auto-forslag)" value={portedResult.f3?.toFixed(1) || '—'} unit="Hz" />
+              <StatCard label="Auto-alignment" value={portedResult.alignmentType} />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
               <NumberInput label="Port diameter" unit={units === 'metric' ? 'mm' : 'in'} value={portDiameter} onChange={(v) => setPort({ diameter: v })} />
               <NumberInput label="Antal porte" value={numPorts} min={1} max={4} onChange={(v) => setPort({ numPorts: v })} />
               <StatCard label="Port længde" value={formatLength(portResult.portLength, units, 1).split(' ')[0]} unit={formatLength(portResult.portLength, units, 1).split(' ')[1]!} />
+              {(design.portVb !== null || design.portFb !== null) && (
+                <Button variant="secondary" size="sm" onClick={() => setPort({ vb: null, fb: null })}>
+                  Nulstil til auto
+                </Button>
+              )}
             </div>
           </div>
         </Card>
       )}
 
-      {cabinetType === 'transmission_line' && tlResult && (
-        <Card title="Transmission line">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatCard label="Line længde" value={formatLength(tlResult.lineLength, units, 0).split(' ')[0]} unit={formatLength(tlResult.lineLength, units, 0).split(' ')[1]!} />
-            <StatCard label="Line areal" value={tlResult.lineArea} unit={units === 'metric' ? 'mm²' : 'in²'} />
-            <StatCard label="Taper ratio" value={`${tlResult.taperRatio}:1`} />
-            <StatCard label="Stuffing" value={tlResult.stuffing} unit="g/L" />
-          </div>
-        </Card>
+      {cabinetType === 'passive_radiator' && selectedDriver?.tsParams && (
+        <PassiveRadiatorCard driver={selectedDriver} />
+      )}
+
+      {cabinetType === 'bandpass4' && selectedDriver?.tsParams && (
+        <Bandpass4Card driver={selectedDriver} />
+      )}
+
+      {cabinetType === 'horn' && selectedDriver?.tsParams && (
+        <HornCard driver={selectedDriver} />
+      )}
+
+      {cabinetType === 'transmission_line' && selectedDriver?.tsParams && (
+        <TransmissionLineCard driver={selectedDriver} />
       )}
 
       {cabinetType === 'open_baffle' && (
@@ -385,8 +439,8 @@ export default function CabinetDesigner() {
         <ExcursionPortCard
           driver={selectedDriver}
           cabinetType={cabinetType}
-          vb={cabinetType === 'sealed' ? sealedResult!.vb : portedResult!.vb}
-          fb={cabinetType === 'ported' ? portedResult!.fb : undefined}
+          vb={cabinetType === 'sealed' ? sealedResult!.vb : effVb}
+          fb={cabinetType === 'ported' ? effFb : undefined}
           portDiameterMm={portDiameter}
           portLengthMm={portResult?.portLength ?? 150}
           numPorts={numPorts}
@@ -403,6 +457,18 @@ export default function CabinetDesigner() {
 
       {/* Multi-subwoofer alignment tool */}
       <MultiSubAlignmentCard />
+
+      {/* Build sheet export (SPEC §9) */}
+      <Card title="Eksport">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Button variant="secondary" onClick={handleBuildSheet}>
+            📄 Download byggeark
+          </Button>
+          <p className="text-xs text-gray-500">
+            Skæreliste, indvendige mål, portspec og driverliste ud fra dimensionerne ovenfor (markdown).
+          </p>
+        </div>
+      </Card>
 
       <NextStep to="/match" label="Kabinet Match" description="Match drivere til dette kabinet" />
     </div>

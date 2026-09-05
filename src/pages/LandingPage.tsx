@@ -40,15 +40,15 @@ export function LandingPage() {
   }, [])
 
   function goToCabinetMatch() {
-    navigate('/match')
+    navigate('/wizard/cabinet')
   }
 
   function goToDrivers() {
-    navigate('/drivers')
+    navigate('/wizard/driver')
   }
 
   function goToFromScratch() {
-    navigate('/cabinet')
+    navigate('/wizard/scratch')
   }
 
   return (

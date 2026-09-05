@@ -346,9 +346,12 @@ export function calcImpedance(params: ImpedanceParams): ImpedanceResult {
     let result: { magnitude: number; phase: number };
 
     switch (cabinetType) {
+      case 'horn':
       case 'sealed':
         result = sealedImpedanceAt(omega, mech, boxVolume || 50, sd);
         break;
+      case 'passive_radiator':
+      case 'bandpass4':
       case 'ported':
         if (fb && fb > 0) {
           result = portedImpedanceAt(omega, mech, boxVolume || 50, fb, sd);

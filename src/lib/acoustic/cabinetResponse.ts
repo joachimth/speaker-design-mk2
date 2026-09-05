@@ -279,6 +279,10 @@ export function calcCabinetResponse(
   }
 
   switch (type) {
+    // Legacy loading-curve path used by the system simulation. The advanced
+    // types map to their nearest 2nd/4th-order behaviour here; the REAL
+    // models (engine/enclosure/*) drive the cards in Kabinetdesign.
+    case 'horn':
     case 'sealed': {
       const { response, alignment } = calcSealedLoading(ts, qtcTarget, frequencies);
       return {
@@ -294,6 +298,8 @@ export function calcCabinetResponse(
       };
     }
 
+    case 'passive_radiator':
+    case 'bandpass4':
     case 'ported': {
       const { response, design } = calcPortedLoading(
         ts,

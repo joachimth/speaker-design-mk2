@@ -4,6 +4,7 @@ import { useDriverStore } from '@/store/driverStore'
 import { Card, Button, Badge, Select } from '@/components/common/UI'
 import { extractPdf, type PdfExtractionResult } from '@/lib/pdf/extractor'
 import { recommendCabinetType } from '@/lib/acoustic/thieleSmall'
+import { checkTsConsistency } from '@/engine/driver'
 import ParameterSetSelector from '@/components/driver/ParameterSetSelector'
 import type { Driver, DriverType, ThieleSmallParams } from '@/types'
 
@@ -352,6 +353,8 @@ function DriverDetail({ driver, onClose }: { driver: Driver; onClose: () => void
   const { updateDriver } = useDriverStore()
   const ts = driver.tsParams
   const rec = ts?.qts ? recommendCabinetType(ts) : null
+  // T/S self-consistency (SPEC §4.1): flag >10 % deviations, never auto-correct
+  const consistencyIssues = ts ? checkTsConsistency(ts) : []
 
   function handleParameterSelect(params: ThieleSmallParams, _setName: string) {
     updateDriver({
@@ -374,6 +377,28 @@ function DriverDetail({ driver, onClose }: { driver: Driver; onClose: () => void
 
         {/* Parameter set selector */}
         <ParameterSetSelector driver={driver} onSelect={handleParameterSelect} />
+
+        {/* T/S consistency warnings (SPEC §4.1) */}
+        {consistencyIssues.length > 0 && (
+          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-md p-3">
+            <div className="text-sm font-medium text-amber-800 dark:text-amber-200 mb-1">
+              ⚠️ T/S-parametre er ikke selvkonsistente
+            </div>
+            <ul className="space-y-0.5">
+              {consistencyIssues.map((issue) => (
+                <li key={issue.field} className="text-xs text-amber-700 dark:text-amber-300">
+                  <strong>{issue.field.toUpperCase()}</strong>: opgivet {issue.stated.toPrecision(3)},
+                  men de øvrige parametre giver {issue.derived.toPrecision(3)} (afvigelse{' '}
+                  {issue.deviationPct.toFixed(0)} %).
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+              Typisk et datablad med afrundede tal eller en tastefejl. Simuleringen bruger de
+              opgivne værdier uændret — ret dem hvis afvigelsen er stor.
+            </p>
+          </div>
+        )}
 
         {ts && (
           <div>

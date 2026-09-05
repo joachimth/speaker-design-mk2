@@ -17,6 +17,7 @@ import { useSimulationWorker } from '@/hooks/useSimulationWorker'
 import { calcInRoomResponse, ROOM_PRESETS, type RoomAcousticsParams } from '@/lib/acoustic/roomAcoustics'
 import { calcCabinetResponse } from '@/lib/acoustic/cabinetResponse'
 import { exportBiquads, exportBiquadsJSON, export4x10HD } from '@/lib/acoustic/biquadExport'
+import { downloadCamillaDSP } from '@/lib/export/camillaDSP'
 import { calcImpedance, impedanceMetrics } from '@/lib/acoustic/impedance'
 import { calcSystemPhase, assessGroupDelay } from '@/lib/acoustic/groupDelay'
 import { computePreferenceScore, type PreferenceScoreResult } from '@/lib/acoustic/preferenceScore'
@@ -1282,6 +1283,12 @@ export default function SystemSimulation() {
           </Button>
           <Button onClick={handleExport4x10HD} variant="secondary">
             🔢 Biquad til MiniDSP 4x10 HD
+          </Button>
+          <Button
+            onClick={() => downloadCamillaDSP(design.bands, design.ways, sampleRate, projectName || 'speaker-design')}
+            variant="secondary"
+          >
+            🎛️ CamillaDSP YAML
           </Button>
           <Button
             onClick={() => {
