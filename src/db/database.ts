@@ -2,7 +2,7 @@
 // Stores: drivers, projects, settings
 
 import Dexie, { type Table } from 'dexie';
-import type { Driver, Project } from '@/types';
+import type { Driver, Project, DesignVersion } from '@/types';
 
 export interface Settings {
   id: string;
@@ -14,6 +14,7 @@ export class SpeakerDesignDB extends Dexie {
   drivers!: Table<Driver, string>;
   projects!: Table<Project, string>;
   settings!: Table<Settings, string>;
+  designVersions!: Table<DesignVersion, string>;
 
   constructor() {
     super('SpeakerDesignDB');
@@ -21,6 +22,10 @@ export class SpeakerDesignDB extends Dexie {
       drivers: 'id, manufacturer, model, type, createdAt',
       projects: 'id, name, createdAt',
       settings: 'id, key',
+    });
+    // v2: design versioning (SPEC §3) — snapshots chained via parentVersion
+    this.version(2).stores({
+      designVersions: 'id, projectKey, createdAt',
     });
   }
 }

@@ -45,9 +45,9 @@ Reglen for afkrydsning: et punkt er først done når det er **implementeret, tes
 - [x] Flow A "Jeg har et kabinet": 3 trin med ord-slidere → rangerede driverkort med score-ring, top 3-badge og "Hvorfor denne score?"-udfoldning (/wizard/cabinet)
 - [x] Flow B "Fra bunden": 4 trin (mål → enheder → kabinet → opsummering, /wizard/scratch) + "Jeg har enheder"-flow (/wizard/driver). Landing-indgangene peger nu på wizards
 - [x] Design-dashboard (/dashboard, fælles slutskærm — wizards lander her): status-badge Klar/Kræver opmærksomhed/Ikke realiserbar med årsag, samlede engine-advarsler for alle 7 kabinettyper med "Anvend"-knap + Fortryd (lib/designHealth.ts, testet), nøgletal (F3, maks-SPL ved valgbar referenceeffekt, 8-dels score), systemrespons-plot, eksport-række (byggeark/CamillaDSP/EqAPO)
-- [ ] Dashboard-faner (Spinorama/XO/Impedans/Excursion/Kabinet i selve dashboardet — i dag links til siderne) + fuld inline-redigering i venstrekolonnen
-- [ ] "Hvorfor ser det sådan ud?"-annotationslag
-- [ ] Design-versionering (snapshots med parent_version)
+- [x] Dashboard-faner (Oversigt/Spinorama/Delefilter/Impedans/Excursion & port i selve dashboardet — spinorama/impedans/excursion beregnes lazy pr. fane på samme engine-kald som designHealth). Kabinet-fane (3D + stående bølger) + fuld inline-redigering udestår
+- [x] "Hvorfor ser det sådan ud?"-annotationslag (lib/annotations.ts, testet): bafflestep, kantdiffraktion, port/PR/bandpass-tuning, TL ¼-bølge, hornlængde, dipol-peak, delefrekvenser, F3 — lodrette markører + forklaringsliste på responsplottet
+- [x] Design-versionering (snapshots med parent_version, SPEC §3): IndexedDB v2 designVersions-tabel, Gem version/Gendan-kort i dashboardet, lineage-helpers testet
 
 ## Fase 5 — TL, horn, bandpass, open baffle, kabinet-mekanik
 - [x] Åben baffel (dipol-model) i kabinetberegner (mk1-arv)
@@ -64,7 +64,7 @@ Reglen for afkrydsning: et punkt er først done når det er **implementeret, tes
 - [x] Byggeark koblet til UI (Kabinetdesign → Eksport: skæreliste, portspec, driverliste) — eksport-tests tilføjet
 - [x] CamillaDSP YAML koblet til UI (Simulering + Dashboard) — eksport-tests tilføjet, kanalnavne følger nu båndets rolle (2-vejs = bass/treble)
 - [x] Equalizer APO-eksport (LPQ/HPQ-dekomposition i kaskaderede 2. ordens-sektioner: BW2/LR2/BW4/LR4/LR8; polaritet via Copy, gain via Preamp, delay, PK/LS/HS-EQ; 1. ordens markeres ærligt som ikke-understøttet). Testet
-- [ ] Hypex FusionAmp, ADAU1701/1452
+- [x] Hypex FusionAmp + ADAU/SigmaStudio (lib/export/hypexAdau.ts, testet): biquad-kaskader pr. kanal i tilbagekoblingsform med konventionen angivet i headeren, ADAU også 5.23-hex; gain/polaritet/delay pr. kanal. Tekstark til manuel indtastning i HFD/SigmaStudio — native filformater findes ikke åbent
 - [ ] OpenSCAD-parametre / DXF til baffeludskæring
 - [x] FRD/ZMA-import (eksplicit typede parsere — SPL forveksles aldrig med impedans; kommentarer, EU-decimalkomma, tab/semikolon, sortering; testet). Import på eksisterende enhed i driverdetaljen + FRD-eksport af simuleret systemrespons i Simulering
 - [x] Kvalitetsflag A/B/C pr. driver (SPEC §6: A = målt on/off-axis + Z, B = målt on-axis, C = kun datablad) som badge i driverliste + detalje; C-drivere flages som info i dashboardet. Optimizer-straf for C og usikkerhedsbånd udestår

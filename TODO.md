@@ -36,18 +36,25 @@ Langsigtet status mod spec: se [ROADMAP.md](ROADMAP.md). Krav: [docs/SPEC.md](do
 - [x] 3 spec-drivere: E180HE-44, WF146WA05, W4-1052SDF (datablads-proveniens i noter)
 
 ### Fase D — afsluttet 5. sep 2026
-- [x] Design-dashboard med status-badge + "Anvend"-advarsler samlet (SPEC §7.4) — /dashboard, lib/designHealth.ts, alle 7 kabinettyper, Fortryd-knap. Faner + "Hvorfor"-lag udestår (Fase E)
+- [x] Design-dashboard med status-badge + "Anvend"-advarsler samlet (SPEC §7.4) — /dashboard, lib/designHealth.ts, alle 7 kabinettyper, Fortryd-knap (faner + "Hvorfor"-lag kom i Fase E)
 - [x] FRD/ZMA-import + A/B/C kvalitetsflag (SPEC §6, §9) — import i driverdetaljen, badges i liste+detalje, FRD-eksport af simuleret respons
 - [x] Reverse-null-test i UI (SPEC §7.5) — Delingsfilter, fasebevidst summering, nul-dybde-vurdering
 - [ ] Golden tests mod WinISD/Hornresp CSV (kræver eksterne kørsler)
 - [x] Eksport-tests for byggeark/CamillaDSP + Equalizer APO-eksport (LPQ/HPQ-kaskader). NB: CamillaDSP/EqAPO-kanalnavne følger nu båndets rolle
 
-### Fase E — næste
-- [ ] Dashboard-faner (Spinorama/XO/Impedans/Excursion i dashboardet) + "Hvorfor ser det sådan ud?"-annotationslag
-- [ ] Design-versionering (snapshots med parent_version, SPEC §3)
-- [ ] Akustiske mål-slopes (optimizer finder elektrisk filter der rammer akustisk LR4)
-- [ ] Hypex FusionAmp / ADAU-eksport
+### Fase E — afsluttet 5. sep 2026
+- [x] Dashboard-faner (Oversigt/Spinorama/Delefilter/Impedans/Excursion & port) — spinorama/impedans/excursion beregnes lazy pr. fane på samme engine-kald som designHealth
+- [x] "Hvorfor ser det sådan ud?"-annotationslag (lib/annotations.ts, testet) — bafflestep, kantdiffraktion, port/PR/bandpass-tuning, TL ¼-bølge, hornlængde, dipol-peak, delefrekvenser og F3 som markører + forklaringsliste på responsplottet
+- [x] Design-versionering (SPEC §3) — snapshots med parent_version i IndexedDB (db v2, designVersions-tabel), Gem version/Gendan-kort i dashboardet, lineage/nummererings-helpers testet
+- [x] Hypex FusionAmp / ADAU-eksport (lib/export/hypexAdau.ts, testet) — biquad-kaskader pr. kanal i tilbagekoblingsform (konvention angivet i headeren), ADAU også med 5.23-hex; gain/polaritet/delay pr. kanal. Tekstark til manuel indtastning i HFD/SigmaStudio — ingen native filformater
+- [ ] Akustiske mål-slopes (optimizer finder elektrisk filter der rammer akustisk LR4) — flyttet til Fase F
 - [ ] Golden tests mod WinISD/Hornresp CSV (fortsat åbent — eksterne kørsler)
+
+### Fase F — næste
+- [ ] Akustiske mål-slopes (SPEC §4.14)
+- [ ] Dashboard: Kabinet-fane (3D + stående bølger) + fuld inline-redigering i venstrekolonnen
+- [ ] OpenSCAD-parametre / DXF til baffeludskæring
+- [ ] Golden tests mod WinISD/Hornresp CSV (eksterne kørsler)
 
 ## Regler (fra Joachim, gælder al optimizer-kode)
 - Gains må KUN dæmpe, aldrig booste. Bånd 0 (woofer) altid låst på 0 dB.

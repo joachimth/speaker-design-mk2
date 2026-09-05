@@ -278,6 +278,21 @@ export interface Project {
   updatedAt: number;
 }
 
+/**
+ * A saved snapshot of the active design (SPEC §3 — design versioning).
+ * Versions are grouped by projectKey (project id, or project name for
+ * unsaved designs) and chained via parentVersion.
+ */
+export interface DesignVersion {
+  id: string;
+  projectKey: string;
+  version: number;
+  parentVersion: number | null;
+  note: string;
+  design: DesignState;
+  createdAt: number;
+}
+
 // ---------------------------------------------------------------------------
 // Simulation results
 // ---------------------------------------------------------------------------
