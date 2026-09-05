@@ -821,7 +821,8 @@ export default function DesignDashboard() {
               />
               <p className="text-xs text-gray-500 mt-2">
                 Jævnt faldende sound power og glat DI uden hop giver den mest naturlige lyd i rum (Harman/Olive).
-                Direktiviteten er stempel-baseret pr. enhed — kantdiffraktion indgår i on-axis-kurven.
+                Direktivitet: stempelmodel pr. enhed + kantdiffraktion pr. vinkel — driverplaceringer på baflen og
+                roundover indgår i alle kurver (far-field, front-halvkugle).
               </p>
             </>
           ) : (
