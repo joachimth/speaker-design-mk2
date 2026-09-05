@@ -3,6 +3,7 @@ import { useDriverStore } from '@/store/driverStore'
 import { useDesignStore } from '@/store/designStore'
 import { Card, Select, NumberInput, Badge, Button, StatCard } from '@/components/common/UI'
 import { buildCrossoverFilter, applyCrossover, crossoverSlopeDbPerOctave } from '@/lib/acoustic/crossover'
+import { simulateOnAxisWithBands, complexSum } from '@/lib/acoustic/simulateBands'
 import { generateFrequencies } from '@/lib/acoustic/thieleSmall'
 import { suggestCrossover, acousticCenterDepth } from '@/lib/acoustic/autoDesign'
 import { calcSystemPhase, assessGroupDelay } from '@/lib/acoustic/groupDelay'
@@ -12,7 +13,7 @@ import { ResponsivePlot } from '@/components/charts/ResponsivePlot'
 import { CrossoverSlider } from '@/components/CrossoverSlider'
 import { NextStep } from '@/components/NextStep'
 import { ImpedanceMatchCard } from '@/components/ImpedanceMatchCard'
-import type { CrossoverType, FrequencyDataPoint, DesignBand, Driver, Crossover, Cabinet } from '@/types'
+import type { CrossoverType, FrequencyDataPoint, DesignBand, Driver, Crossover, Cabinet, DesignState } from '@/types'
 
 const XOVER_TYPES: { value: CrossoverType; label: string }[] = [
   { value: 'first_order', label: '1. ordens (6 dB/okt)' },
@@ -586,6 +587,9 @@ function findClosestIndex(arr: number[], target: number): number {
         </Card>
       )}
 
+      {/* Reverse-null test (SPEC §7.5) */}
+      <ReverseNullCard bands={bands} ways={ways} drivers={drivers} design={design} />
+
       {/* Time alignment */}
       <TimeAlignmentCard
         bands={bands.slice(0, ways)}
@@ -668,5 +672,164 @@ function findClosestIndex(arr: number[], target: number): number {
 
       <NextStep to="/system" label="System Simulering" description="Se samlet systemrespons og optimer mod målkurve" />
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Reverse-null test (SPEC §7.5): flip polarity on the upper band of a
+// crossover pair — a deep null at the XO frequency confirms phase alignment.
+// Uses the SHARED phase-aware summation (processBand + complexSum), not the
+// magnitude-only quick view above.
+// ---------------------------------------------------------------------------
+
+function ReverseNullCard({
+  bands,
+  ways,
+  drivers,
+  design,
+}: {
+  bands: DesignBand[]
+  ways: number
+  drivers: Driver[]
+  design: DesignState
+}) {
+  const [enabled, setEnabled] = useState(false)
+  const [pairIndex, setPairIndex] = useState(0)
+
+  const activeBands = bands.slice(0, ways)
+  const pairs: { value: number; label: string }[] = []
+  for (let i = 0; i < ways - 1; i++) {
+    pairs.push({
+      value: i,
+      label: `${ROLE_LABELS[activeBands[i]?.role ?? ''] ?? `Vej ${i + 1}`} ↔ ${ROLE_LABELS[activeBands[i + 1]?.role ?? ''] ?? `Vej ${i + 2}`}`,
+    })
+  }
+  const pair = Math.min(pairIndex, pairs.length - 1)
+
+  const result = useMemo(() => {
+    if (!enabled || pairs.length === 0) return null
+    const withDrivers = activeBands.filter((b) => drivers.some((d) => d.id === b.driverId))
+    if (withDrivers.length < 2) return null
+
+    const upperBand = activeBands[pair + 1]
+    const lowerBand = activeBands[pair]
+    if (!upperBand || !lowerBand) return null
+
+    // XO frequency: geometric mean of lower LP and upper HP (usually equal)
+    const lp = lowerBand.lowpassFreq
+    const hp = upperBand.highpassFreq
+    const fXO = lp > 0 && hp > 0 ? Math.sqrt(lp * hp) : lp > 0 ? lp : hp
+    if (!fXO || fXO <= 0) return null
+
+    const freqs: number[] = []
+    for (let i = 0; i < 280; i++) freqs.push(20 * Math.pow(20000 / 20, i / 279))
+
+    try {
+      const { summed, processedBands } = simulateOnAxisWithBands(
+        withDrivers, drivers, freqs,
+        design.baffleWidth, design.baffleHeight,
+        design.cabinetType, design.portFb ?? 0, design.portVb ?? 0,
+        design.portDiameter, design.numPorts,
+      )
+      if (processedBands.length < 2) return null
+
+      const flipped = processedBands.map((pb) =>
+        pb.band.role === upperBand.role
+          ? { ...pb, band: { ...pb.band, polarity: (pb.band.polarity === 180 ? 0 : 180) as 0 | 180 } }
+          : pb,
+      )
+      const inverted = complexSum(flipped, freqs)
+
+      // Null depth: min of inverted sum near fXO vs normal sum at same freq
+      let minIdx = -1
+      let minVal = Infinity
+      for (let i = 0; i < freqs.length; i++) {
+        const f = freqs[i]!
+        if (f < fXO / 1.6 || f > fXO * 1.6) continue
+        if (inverted[i]!.magnitude < minVal) {
+          minVal = inverted[i]!.magnitude
+          minIdx = i
+        }
+      }
+      if (minIdx < 0) return null
+      const depth = summed[minIdx]!.magnitude - minVal
+
+      return { summed, inverted, fXO, nullFreq: freqs[minIdx]!, depth }
+    } catch {
+      return null
+    }
+  }, [enabled, pair, pairs.length, activeBands, drivers, design])
+
+  const verdict = result
+    ? result.depth >= 20
+      ? { color: 'text-green-600 dark:text-green-400', text: `Dybt nul (${result.depth.toFixed(0)} dB) ved ${result.nullFreq.toFixed(0)} Hz — faserne er godt alignet ved overgangen.` }
+      : result.depth >= 10
+        ? { color: 'text-amber-600 dark:text-amber-400', text: `Moderat nul (${result.depth.toFixed(0)} dB) ved ${result.nullFreq.toFixed(0)} Hz — brugbar alignment, men delay/polaritet kan finjusteres.` }
+        : { color: 'text-red-600 dark:text-red-400', text: `Fladt nul (kun ${result.depth.toFixed(0)} dB) — faserne er IKKE alignet ved overgangen. Tjek delay, polaritet og filtertyper.` }
+    : null
+
+  return (
+    <Card title="Reverse-null test">
+      <div className="space-y-3">
+        <p className="text-xs text-gray-500">
+          Vender polariteten på den øverste vej i en overgang. Et dybt nul ved delefrekvensen bekræfter
+          at faserne er alignet (SPEC §7.5) — samme test som med målemikrofon i virkeligheden.
+          Beregnet med den fasebevidste summering (filterfase + polaritet + delay).
+        </p>
+        <div className="flex items-end gap-3 flex-wrap">
+          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            Aktivér reverse-null
+          </label>
+          {enabled && pairs.length > 1 && (
+            <Select
+              label="Overgang"
+              value={pair}
+              onChange={(v) => setPairIndex(parseInt(v))}
+              options={pairs}
+            />
+          )}
+        </div>
+
+        {enabled && !result && (
+          <p className="text-sm text-gray-500">
+            Kræver mindst 2 veje med valgte enheder og en delefrekvens mellem vejene.
+          </p>
+        )}
+
+        {enabled && result && verdict && (
+          <>
+            <p className={`text-sm font-medium ${verdict.color}`}>{verdict.text}</p>
+            <ResponsivePlot
+              data={[
+                {
+                  x: result.summed.map((p) => p.freq),
+                  y: result.summed.map((p) => p.magnitude),
+                  name: 'Normal sum',
+                  color: '#3b82f6',
+                },
+                {
+                  x: result.inverted.map((p) => p.freq),
+                  y: result.inverted.map((p) => p.magnitude),
+                  name: 'Inverteret sum',
+                  color: '#ef4444',
+                  dash: true,
+                },
+              ]}
+              yLabel="dB SPL"
+            />
+            <p className="text-xs text-gray-400">
+              Delefrekvens {result.fXO.toFixed(0)} Hz · dybeste nul ved {result.nullFreq.toFixed(0)} Hz ·
+              dybde {result.depth.toFixed(1)} dB under normal sum.
+            </p>
+          </>
+        )}
+      </div>
+    </Card>
   )
 }

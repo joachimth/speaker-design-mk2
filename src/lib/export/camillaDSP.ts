@@ -28,7 +28,8 @@ export function exportCamillaDSP(
     channels: [],
   };
 
-  const roleNames = ['bass', 'mid', 'mid2', 'treble'];
+  // Channel names follow the band ROLE (a 2-way is bass/treble, not bass/mid)
+  const roleNames: Record<string, string> = { low: 'bass', mid: 'mid', mid2: 'mid2', high: 'treble' };
 
   for (let i = 0; i < ways && i < bands.length; i++) {
     const band = bands[i]!;
@@ -66,7 +67,7 @@ export function exportCamillaDSP(
     }
 
     config.channels.push({
-      name: roleNames[i] ?? `ch${i}`,
+      name: roleNames[band.role] ?? `ch${i}`,
       gain: band.gain,
       delayMs: band.delay,
       polarity: band.polarity,

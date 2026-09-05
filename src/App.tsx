@@ -13,6 +13,7 @@ const WizardCabinet = lazy(() => import('./pages/WizardCabinet'))
 const WizardDriver = lazy(() => import('./pages/WizardDriver'))
 const WizardScratch = lazy(() => import('./pages/WizardScratch'))
 const WaveguideDesigner = lazy(() => import('./components/WaveguideDesigner').then(m => ({ default: m.WaveguideDesigner })))
+const DesignDashboard = lazy(() => import('./pages/DesignDashboard'))
 import { useDriverStore } from './store/driverStore'
 import { useDesignStore } from '@/store/designStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -62,7 +63,8 @@ export default function App() {
     { to: '/match', label: '3. Kabinet Match' },
     { to: '/crossover', label: '4. Delingsfilter' },
     { to: '/system', label: '5. System Sim.' },
-    { to: '/compare', label: '6. A/B Sammenlign' },
+    { to: '/dashboard', label: '6. Dashboard' },
+    { to: '/compare', label: 'A/B Sammenlign' },
     { to: '/waveguide', label: 'Waveguide' },
   ]
 
@@ -203,6 +205,7 @@ export default function App() {
           <Route path="/crossover" element={<CrossoverDesigner />} />
           <Route path="/simulation" element={<Navigate to="/system" replace />} />
           <Route path="/system" element={<SystemSimulation />} />
+          <Route path="/dashboard" element={<Suspense fallback={<div className="p-8 text-center text-gray-500">Indlæser...</div>}><DesignDashboard /></Suspense>} />
           <Route path="/compare" element={<Suspense fallback={<div className="p-8 text-center text-gray-500">Indlæser...</div>}><DesignCompare /></Suspense>} />
           <Route path="/waveguide" element={<Suspense fallback={<div className="p-8 text-center text-gray-500">Indlæser waveguide designer...</div>}><WaveguideDesigner /></Suspense>} />
           <Route path="*" element={<Navigate to="/" replace />} />

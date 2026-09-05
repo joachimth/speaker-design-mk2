@@ -6,6 +6,7 @@ import { extractPdf, type PdfExtractionResult } from '@/lib/pdf/extractor'
 import { recommendCabinetType } from '@/lib/acoustic/thieleSmall'
 import { checkTsConsistency } from '@/engine/driver'
 import ParameterSetSelector from '@/components/driver/ParameterSetSelector'
+import { driverQuality, QUALITY_BADGE_COLOR } from '@/lib/acoustic/frdZma'
 import type { Driver, DriverType, ThieleSmallParams } from '@/types'
 
 const DRIVER_TYPE_COLORS: Record<DriverType, 'gray' | 'green' | 'blue' | 'orange' | 'red'> = {
@@ -251,6 +252,7 @@ export default function DriverManager() {
                 >
                   <div className="flex items-center gap-3">
                     <Badge color={DRIVER_TYPE_COLORS[driver.type]}>{DRIVER_TYPE_LABELS[driver.type]}</Badge>
+                    <Badge color={QUALITY_BADGE_COLOR[driverQuality(driver).flag]}>{driverQuality(driver).flag}</Badge>
                     <div>
                       <div className="font-medium text-sm text-gray-900 dark:text-gray-100">
                         {driver.manufacturer} {driver.model}
@@ -355,6 +357,9 @@ function DriverDetail({ driver, onClose }: { driver: Driver; onClose: () => void
   const rec = ts?.qts ? recommendCabinetType(ts) : null
   // T/S self-consistency (SPEC §4.1): flag >10 % deviations, never auto-correct
   const consistencyIssues = ts ? checkTsConsistency(ts) : []
+  const quality = driverQuality(driver)
+  const frdFileRef = useRef<HTMLInputElement>(null)
+  const [frdStatus, setFrdStatus] = useState<string | null>(null)
 
   function handleParameterSelect(params: ThieleSmallParams, _setName: string) {
     updateDriver({
@@ -364,6 +369,40 @@ function DriverDetail({ driver, onClose }: { driver: Driver; onClose: () => void
     })
   }
 
+  // FRD/ZMA import onto the EXISTING driver (SPEC §6, §9)
+  async function handleFrdZmaImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      const name = file.name.toLowerCase()
+      const { parseFrdText, parseZmaText } = await import('@/lib/acoustic/frdZma')
+      const { downsampleCurve } = await import('@/lib/acoustic/rewImport')
+
+      if (name.endsWith('.zma')) {
+        const result = parseZmaText(text)
+        if (result.points.length === 0) {
+          setFrdStatus('Kunne ikke parse ZMA-filen — ingen gyldige datapunkter.')
+          return
+        }
+        updateDriver({ ...driver, impedance: result.points, updatedAt: Date.now() })
+        setFrdStatus(`Impedans importeret: ${result.points.length} punkter${result.hasPhase ? ' med fase' : ''}${result.skippedLines ? ` (${result.skippedLines} linjer sprunget over)` : ''}.`)
+      } else {
+        const result = parseFrdText(text)
+        if (result.points.length === 0) {
+          setFrdStatus('Kunne ikke parse FRD-filen — ingen gyldige datapunkter.')
+          return
+        }
+        const points = result.points.length > 200 ? downsampleCurve(result.points, 200) : result.points
+        updateDriver({ ...driver, frequencyResponse: points, updatedAt: Date.now() })
+        setFrdStatus(`Frekvensgang importeret: ${result.points.length} punkter${result.points.length > 200 ? ` (nedsamplet til ${points.length})` : ''}${result.hasPhase ? ' med fase' : ''}.`)
+      }
+    } catch (err: unknown) {
+      setFrdStatus(`Fejl: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    if (frdFileRef.current) frdFileRef.current.value = ''
+  }
+
   return (
     <Card
       title={`${driver.manufacturer} ${driver.model}`}
@@ -371,8 +410,34 @@ function DriverDetail({ driver, onClose }: { driver: Driver; onClose: () => void
     >
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <Badge color={DRIVER_TYPE_COLORS[driver.type]}>{DRIVER_TYPE_LABELS[driver.type]}</Badge>
+          <div className="flex items-center gap-2">
+            <Badge color={DRIVER_TYPE_COLORS[driver.type]}>{DRIVER_TYPE_LABELS[driver.type]}</Badge>
+            <Badge color={QUALITY_BADGE_COLOR[quality.flag]}>Datakvalitet {quality.flag}</Badge>
+          </div>
           <Button variant="ghost" size="sm" onClick={onClose}>Luk</Button>
+        </div>
+        <p className="text-xs text-gray-500">{quality.reason}</p>
+
+        {/* FRD/ZMA import (SPEC §6) */}
+        <div className="border border-gray-200 dark:border-gray-700 rounded-md p-3">
+          <div className="text-sm font-medium mb-1">Importér måling (FRD/ZMA)</div>
+          <p className="text-xs text-gray-500 mb-2">
+            .frd = frekvensgang (Hz, dB, fase), .zma = impedans (Hz, Ω, fase) — formatet fra VituixCAD, REW og ARTA.
+            Målte kurver løfter datakvaliteten fra C mod A og bruges direkte i simuleringen.
+          </p>
+          <input
+            ref={frdFileRef}
+            type="file"
+            accept=".frd,.zma,.txt,text/plain"
+            onChange={handleFrdZmaImport}
+            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+          />
+          {frdStatus && <div className="text-xs text-blue-600 dark:text-blue-400 mt-2">{frdStatus}</div>}
+          <div className="text-xs text-gray-400 mt-2">
+            {driver.frequencyResponse?.length ? `✓ Frekvensgang: ${driver.frequencyResponse.length} punkter` : '— Ingen målt frekvensgang'}
+            {' · '}
+            {driver.impedance?.length ? `✓ Impedans: ${driver.impedance.length} punkter` : '— Ingen målt impedans'}
+          </div>
         </div>
 
         {/* Parameter set selector */}

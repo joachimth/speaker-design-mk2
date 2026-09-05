@@ -12,6 +12,7 @@ import { generateTargetCurve, optimizeForTargetCurve, type TargetCurveType } fro
 import { psychoacousticSmooth } from '@/lib/acoustic/smoothing'
 import { exportPlotToPng } from '@/lib/utils/pngExport'
 import { downloadREWExport } from '@/lib/acoustic/rewExport'
+import { downloadFrd } from '@/lib/acoustic/frdZma'
 import { saveProject } from '@/db/database'
 import { useSimulationWorker } from '@/hooks/useSimulationWorker'
 import { calcInRoomResponse, ROOM_PRESETS, type RoomAcousticsParams } from '@/lib/acoustic/roomAcoustics'
@@ -1300,6 +1301,17 @@ export default function SystemSimulation() {
             disabled={!summedResponse}
           >
             📊 Eksporter til REW
+          </Button>
+          <Button
+            onClick={() => {
+              if (summedResponse) {
+                downloadFrd(summedResponse, projectName || 'system-response')
+              }
+            }}
+            variant="secondary"
+            disabled={!summedResponse}
+          >
+            📈 FRD (simuleret respons)
           </Button>
         </div>
         <p className="text-xs text-gray-500 mt-2">

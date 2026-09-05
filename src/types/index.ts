@@ -41,6 +41,7 @@ export type DriverType = 'woofer' | 'midrange' | 'tweeter' | 'fullrange' | 'subw
 export interface FrequencyDataPoint {
   freq: number;   // [Hz]
   magnitude: number; // [dB]
+  phase?: number;    // [degrees] (optional, from FRD import)
 }
 
 export interface ImpedanceDataPoint {

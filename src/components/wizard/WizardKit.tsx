@@ -338,7 +338,7 @@ export function useApplyWizardResult() {
     if (overall && overall + 60 > design.baffleWidth) {
       updateDesign({ baffleWidth: overall + 60 })
     }
-    navigate('/system')
+    navigate('/dashboard')
   }
 }
 
