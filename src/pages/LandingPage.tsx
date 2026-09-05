@@ -1,11 +1,43 @@
-// Landing page — the mk2 wizard with 3 entry points.
+// Landing page — the mk2 wizard with 3 entry points (SPEC §7.1).
 // "Hvad har du?" → I have a cabinet / I have drivers / Start from scratch
+// Plus "Seneste designs" so returning users land directly in their work.
 
 import { useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { Card } from '@/components/common/UI'
+import { getAllProjects } from '@/db/database'
+import { useDesignStore } from '@/store/designStore'
+import type { Project } from '@/types'
 
 export function LandingPage() {
   const navigate = useNavigate()
+  const { loadDesign } = useDesignStore()
+  const [recent, setRecent] = useState<Project[]>([])
+
+  function openRecent(p: Project) {
+    if (p.designState) {
+      loadDesign(p.designState, p.name, p.id)
+      navigate('/system')
+    } else {
+      navigate('/overview')
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    getAllProjects()
+      .then((all) => {
+        if (cancelled) return
+        const sorted = [...all].sort(
+          (a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt),
+        )
+        setRecent(sorted.slice(0, 3))
+      })
+      .catch(() => setRecent([]))
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   function goToCabinetMatch() {
     navigate('/match')
@@ -88,6 +120,36 @@ export function LandingPage() {
           </button>
         </div>
       </Card>
+
+      {recent.length > 0 && (
+        <div className="mt-8">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+              Seneste designs
+            </h2>
+            <button
+              onClick={() => navigate('/overview')}
+              className="text-xs text-brand-500 hover:text-brand-600"
+            >
+              Alle projekter →
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {recent.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => openRecent(p)}
+                className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-brand-400 transition-colors text-left bg-white dark:bg-gray-800"
+              >
+                <div className="font-medium text-gray-800 dark:text-gray-200 truncate">{p.name}</div>
+                <div className="text-xs text-gray-400 mt-1">
+                  {new Date(p.updatedAt ?? p.createdAt).toLocaleDateString('da-DK')}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mt-8 text-center">
         <p className="text-sm text-gray-400">

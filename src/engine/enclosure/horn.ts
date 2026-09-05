@@ -1,203 +1,195 @@
-// Horn enclosure model using Webster's horn equation.
+// Horn model on the shared lumped-element core (SPEC §4.7).
+// Webster's horn equation solved by complex T-matrix over profile
+// segments. Mouth radiation impedance is the full piston-in-baffle
+// model (resistive + reactive, Bessel/Struve) — this is what creates
+// the below-cutoff reflection and mouth-size ripple.
 //
-// The horn profile is solved using transfer-matrix discretization.
-// Supported profiles: exponential, hyperbolic, tractrix, conical, Le Cléac'h.
-//
-// References: Leach, "Horn Analysis with the One-Parameter Wave Equation";
-//             Keele, "Low-Frequency Horn Design Using Thiele/Small Parameters";
-//             Geddes, "Audio Transducers".
+// Supports front-loaded (sealed rear chamber, horn on the cone front,
+// optional front compression chamber) and back-loaded (driver front
+// radiates directly, rear drives the horn) topologies.
 
-import type { FrequencyDataPoint } from '@/types';
+import { RHO0, C0, pistonRadiationImpedance, pressureMagHalfSpace, pascalsToDbSpl } from '../acoustics';
+import {
+  acousticCompliance,
+  complianceImpedance,
+  solveDriver,
+  zParallel,
+  ductSegmentT,
+  tMultiply,
+  tInputImpedance,
+  tOutputVolumeVelocity,
+  IDENTITY_T,
+} from '../lumped';
+import { cmag, cdiv, cmul, csub, type Complex } from '../complex';
+import { deriveDriverModel } from '../driver';
+import type { ThieleSmallParams } from '@/types';
 
-const C = 343; // speed of sound [m/s]
-const RHO_0 = 1.225; // air density [kg/m³]
-
-export type HornProfile = 'exponential' | 'hyperbolic' | 'tractrix' | 'conical' | 'lecleach';
+export type HornProfile = 'exponential' | 'conical' | 'tractrix' | 'hyperbolic';
 
 export interface HornParams {
   profile: HornProfile;
-  throatArea: number;   // [m²]
-  mouthArea: number;    // [m²]
-  length: number;       // [m]
-  rearChamberVolume: number; // [L] (back volume behind driver)
-  frontChamberVolume: number; // [L] (front volume between driver and throat)
-  flareConstant?: number; // m (for exponential/hyperbolic)
-  cutoffFrequency?: number; // Hz (for exponential)
+  throatAreaCm2: number;
+  mouthAreaCm2: number;
+  lengthM: number;
+  /** Rear chamber volume [L] (sealed). 0 = none (back-loaded uses this as coupling chamber). */
+  rearChamberLiters: number;
+  /** Front compression chamber volume [L] between cone and throat. 0 = none. */
+  frontChamberLiters?: number;
+  /** 'front' = front-loaded horn, 'back' = back-loaded (driver also radiates directly) */
+  topology?: 'front' | 'back';
+  /** Hyperbolic T parameter (0.5–1). Only for profile 'hyperbolic'. */
+  hyperbolicT?: number;
 }
 
 export interface HornResult {
-  throatResponse: FrequencyDataPoint[];
-  mouthResponse: FrequencyDataPoint[];
-  summedResponse: FrequencyDataPoint[];
-  cutoffFreq: number;
+  freqs: number[];
+  /** System output [dB SPL @1 m half-space] */
+  spl: number[];
+  splMouth: number[];
+  /** Direct driver radiation (back-loaded only; -∞ pattern for front-loaded) */
+  splDirect: number[];
+  excursionMm: number[];
+  impedance: number[];
+  /** Exponential cutoff fc = m·c/(4π) [Hz] (flare-based estimate for all profiles) */
+  cutoffHz: number;
+  /** True when mouth circumference < λ at fc (expect ripple, SPEC §4.7) */
+  mouthTooSmall: boolean;
 }
 
-/**
- * Calculate horn profile area at a given distance from throat.
- */
-function hornAreaAt(
-  params: HornParams,
-  x: number, // distance from throat [m]
-): number {
-  const { profile, throatArea: S0, mouthArea: Sm, length: L } = params;
-  const t = x / L; // normalized position 0..1
+/** Area at position x for the chosen profile */
+function areaAt(params: HornParams, x: number): number {
+  const st = params.throatAreaCm2 / 1e4;
+  const sm = params.mouthAreaCm2 / 1e4;
+  const L = params.lengthM;
+  const t = Math.min(Math.max(x / L, 0), 1);
 
-  switch (profile) {
-    case 'exponential': {
-      // S(x) = S0 * exp(m*x), where m = ln(Sm/S0) / L
-      const m = Math.log(Sm / S0) / L;
-      return S0 * Math.exp(m * x);
-    }
+  switch (params.profile) {
     case 'conical': {
-      // S(x) = S0 * (1 + x/x0)², where x0 is determined by S0, Sm, L
-      const r = Math.sqrt(Sm / S0);
-      const x0 = L / (r - 1);
-      return S0 * Math.pow(1 + x / x0, 2);
-    }
-    case 'tractrix': {
-      // Tractrix: r(x) = a * (1 - sqrt(1 - (x/a)²)) ... simplified approximation
-      // S(x) = pi * r(x)²
-      const r0 = Math.sqrt(S0 / Math.PI);
-      const rm = Math.sqrt(Sm / Math.PI);
-      
-      // Simplified: interpolate using tractrix shape
-      const r = r0 + (rm - r0) * (1 - Math.cos(t * Math.PI / 2));
+      // Linear radius growth → quadratic area
+      const rt = Math.sqrt(st / Math.PI);
+      const rm = Math.sqrt(sm / Math.PI);
+      const r = rt + (rm - rt) * t;
       return Math.PI * r * r;
     }
     case 'hyperbolic': {
-      // S(x) = S0 * (cosh(m*x/T) + T * sinh(m*x/T))
-      // T = shape parameter (1 = exponential, <1 = hyperbolic)
-      const T = 0.8; // default hyperbolic factor
-      const m = Math.log(Sm / S0) / L;
-      return S0 * (Math.cosh(m * x / T) + T * Math.sinh(m * x / T));
+      const m = Math.log(sm / st) / L;
+      const T = params.hyperbolicT ?? 0.7;
+      const xm = (m / 2) * x;
+      const g = Math.cosh(xm) + T * Math.sinh(xm);
+      return st * g * g;
     }
-    case 'lecleach': {
-      // Le Cléac'h: smooth profile minimizing reflections
-      // Simplified approximation using cosine interpolation
-      const r0 = Math.sqrt(S0 / Math.PI);
-      const rm = Math.sqrt(Sm / Math.PI);
-      const r = r0 * Math.pow(rm / r0, t * (2 - t));
-      return Math.PI * r * r;
+    case 'tractrix': {
+      // Tractrix mouth radius defines the curve; approximate by blending
+      // exponential growth with faster terminal flare.
+      const m = Math.log(sm / st) / L;
+      const expArea = st * Math.exp(m * x);
+      const blend = t * t; // accelerate flare toward the mouth
+      return expArea * (1 - blend) + sm * blend;
     }
+    case 'exponential':
     default:
-      return S0 * Math.pow(Sm / S0, t);
+      return st * Math.exp((Math.log(sm / st) / L) * x);
   }
 }
 
-/**
- * Calculate horn response using discretized Webster's equation.
- *
- * @param params    Horn parameters
- * @param freqs     Frequency array [Hz]
- * @returns Throat, mouth, and summed responses in dB
- */
-export function calcHornResponse(
+const N_SEGMENTS = 40;
+
+export function simulateHorn(
+  ts: ThieleSmallParams,
   params: HornParams,
   freqs: number[],
+  voltage: number = 2.83,
 ): HornResult {
-  const { throatArea: S0, mouthArea: Sm, length: L } = params;
+  const dm = deriveDriverModel(ts);
+  const topology = params.topology ?? 'front';
+  const st = params.throatAreaCm2 / 1e4;
+  const sm = params.mouthAreaCm2 / 1e4;
 
-  // Cutoff frequency for exponential horn
-  const m = Math.log(Sm / S0) / L;
-  const fc = (m * C) / (4 * Math.PI);
+  // Flare constant + cutoff (exponential definition as shared estimate)
+  const m = Math.log(sm / st) / params.lengthM;
+  const cutoffHz = (m * C0) / (4 * Math.PI);
 
-  // Discretize horn into segments for transfer matrix
-  const nSegments = 50;
-  const dx = L / nSegments;
+  // Mouth-size check: circumference ≥ λ at fc for clean loading
+  const mouthCircumference = 2 * Math.PI * Math.sqrt(sm / Math.PI);
+  const lambdaAtFc = C0 / Math.max(cutoffHz, 1);
+  const mouthTooSmall = mouthCircumference < lambdaAtFc;
 
-  const throatResponse: FrequencyDataPoint[] = [];
-  const mouthResponse: FrequencyDataPoint[] = [];
-  const summedResponse: FrequencyDataPoint[] = [];
+  const cabRear = params.rearChamberLiters > 0
+    ? acousticCompliance(params.rearChamberLiters / 1e3, RHO0, C0)
+    : 0;
+  const cabFront = (params.frontChamberLiters ?? 0) > 0
+    ? acousticCompliance((params.frontChamberLiters ?? 0) / 1e3, RHO0, C0)
+    : 0;
+
+  const spl: number[] = [];
+  const splMouth: number[] = [];
+  const splDirect: number[] = [];
+  const excursionMm: number[] = [];
+  const impedance: number[] = [];
 
   for (const f of freqs) {
-    const w = 2 * Math.PI * f;
-    const k = w / C;
-
-    // Propagate through horn segments
-    let totalMatrix = { a: 1, b: 0, c: 0, d: 1 };
-
-    for (let i = 0; i < nSegments; i++) {
-      const x = i * dx;
-      const area = hornAreaAt(params, x);
-      const areaNext = hornAreaAt(params, x + dx);
-      const avgArea = (area + areaNext) / 2;
-
-      const z0 = RHO_0 * C / avgArea;
-      const kdx = k * dx;
-
-      const cosKL = Math.cos(kdx);
-      const sinKL = Math.sin(kdx);
-
-      const segMatrix = {
-        a: cosKL,
-        b: z0 * sinKL,
-        c: sinKL / z0,
-        d: cosKL,
-      };
-
-      // Account for area change (impedance transformation)
-      const areaRatio = areaNext / area;
-      if (Math.abs(areaRatio - 1) > 0.001) {
-        // Transformer matrix for area change
-        const transformMatrix = {
-          a: Math.sqrt(areaRatio),
-          b: 0,
-          c: 0,
-          d: 1 / Math.sqrt(areaRatio),
-        };
-        // Multiply: totalMatrix * segMatrix * transformMatrix
-        const newA = totalMatrix.a * segMatrix.a + totalMatrix.b * segMatrix.c;
-        const newB = totalMatrix.a * segMatrix.b + totalMatrix.b * segMatrix.d;
-        const newC = totalMatrix.c * segMatrix.a + totalMatrix.d * segMatrix.c;
-        const newD = totalMatrix.c * segMatrix.b + totalMatrix.d * segMatrix.d;
-        totalMatrix = {
-          a: newA * transformMatrix.a,
-          b: newB * transformMatrix.d,
-          c: newC * transformMatrix.a,
-          d: newD * transformMatrix.d,
-        };
-      } else {
-        const newA = totalMatrix.a * segMatrix.a + totalMatrix.b * segMatrix.c;
-        const newB = totalMatrix.a * segMatrix.b + totalMatrix.b * segMatrix.d;
-        const newC = totalMatrix.c * segMatrix.a + totalMatrix.d * segMatrix.c;
-        const newD = totalMatrix.c * segMatrix.b + totalMatrix.d * segMatrix.d;
-        totalMatrix = { a: newA, b: newB, c: newC, d: newD };
-      }
+    // Horn T-matrix: chain of duct segments following the profile
+    let tHorn = IDENTITY_T;
+    const dx = params.lengthM / N_SEGMENTS;
+    for (let i = 0; i < N_SEGMENTS; i++) {
+      const aAvg = (areaAt(params, i * dx) + areaAt(params, (i + 1) * dx)) / 2;
+      tHorn = tMultiply(tHorn, ductSegmentT(f, dx, aAvg, 0, C0, RHO0));
     }
 
-    // Mouth radiation impedance (piston in infinite baffle)
-    
-    
-    // Z_mouth = rho_0 * c * (1 - J1(2ka)/(ka)) + j * rho_0 * c * (S1(2ka)/(ka))
-    // Simplified: use resistive part only
-    // const zMouth = RHO_0 * C / Sm * (1 - 2 * besselJ1(2 * ka) / (2 * ka + 1e-30));
+    const zMouth = pistonRadiationImpedance(f, sm);
+    const zThroat = tInputImpedance(tHorn, zMouth);
 
-    // Throat response (driver sees throat impedance)
-    // Loading increases with frequency above cutoff
-    const throatLoading = Math.min(1, f / (fc * 1.5));
-    const throatDb = 20 * Math.log10(throatLoading + 1e-30);
+    let sol;
+    let uIntoHorn: Complex;
+    let uDirect: Complex;
 
-    // Mouth response (pressure at mouth)
-    const mouthDb = throatDb + 10 * Math.log10(Sm / S0 + 1e-30) - 3;
+    if (topology === 'front') {
+      // Front-loaded: rear = sealed chamber, front = (front chamber ∥ horn throat)
+      const zaRear = cabRear > 0 ? complianceImpedance(f, cabRear) : { re: 0, im: 0 };
+      const zaFront = cabFront > 0 ? zParallel(complianceImpedance(f, cabFront), zThroat) : zThroat;
+      sol = solveDriver(dm, f, zaFront, zaRear, voltage);
 
-    // Summed: for back-loaded horn, driver direct + horn mouth with delay
-    const delay = L / C;
-    const phaseDelay = 2 * Math.PI * f * delay;
-    const throatLin = Math.pow(10, throatDb / 20);
-    const mouthLin = Math.pow(10, mouthDb / 20) * Math.cos(phaseDelay);
-    const sumLin = throatLin + mouthLin;
-    const sumDb = 20 * Math.log10(Math.abs(sumLin) + 1e-30);
+      if (cabFront > 0) {
+        const pFront = cmul(zaFront, sol.ud);
+        uIntoHorn = cdiv(pFront, zThroat);
+      } else {
+        uIntoHorn = sol.ud;
+      }
+      uDirect = { re: 0, im: 0 }; // cone is buried
+    } else {
+      // Back-loaded: front radiates directly; rear chamber couples cone → horn
+      const zRearNetwork = cabRear > 0
+        ? zParallel(complianceImpedance(f, cabRear), zThroat)
+        : zThroat;
+      const zaFront = pistonRadiationImpedance(f, dm.sd);
+      sol = solveDriver(dm, f, zaFront, zRearNetwork, voltage);
 
-    throatResponse.push({ freq: f, magnitude: throatDb });
-    mouthResponse.push({ freq: f, magnitude: mouthDb });
-    summedResponse.push({ freq: f, magnitude: sumDb });
+      if (cabRear > 0) {
+        const pRear = cmul(zRearNetwork, sol.ud);
+        uIntoHorn = cdiv(pRear, zThroat);
+      } else {
+        uIntoHorn = sol.ud;
+      }
+      uDirect = sol.ud;
+    }
+
+    const uMouth = tOutputVolumeVelocity(tHorn, uIntoHorn, zMouth);
+
+    // Back-loaded: net = direct − mouth (DC cancellation through the open horn).
+    // Front-loaded: mouth only.
+    const uNet = topology === 'back' ? csub(uDirect, uMouth) : uMouth;
+
+    spl.push(pascalsToDbSpl(pressureMagHalfSpace(f, cmag(uNet), 1)));
+    splMouth.push(pascalsToDbSpl(pressureMagHalfSpace(f, cmag(uMouth), 1)));
+    splDirect.push(
+      topology === 'back'
+        ? pascalsToDbSpl(pressureMagHalfSpace(f, cmag(uDirect), 1))
+        : -120,
+    );
+    excursionMm.push(cmag(sol.x) * 1e3);
+    impedance.push(cmag(sol.ze));
   }
 
-  return {
-    throatResponse,
-    mouthResponse,
-    summedResponse,
-    cutoffFreq: fc,
-  };
+  return { freqs, spl, splMouth, splDirect, excursionMm, impedance, cutoffHz, mouthTooSmall };
 }
 

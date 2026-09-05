@@ -1,91 +1,128 @@
-// Passive radiator enclosure model.
-// Similar to ported but the port mass is replaced by the PR's moving mass.
-// The PR has its own Fs and can be tuned by adding mass.
+// Passive radiator box on the shared lumped-element core (SPEC §4.4).
+// Same circuit as vented, but the port branch is replaced by the PR's
+// mass–compliance–loss branch. The characteristic response notch at the
+// PR's own free resonance emerges from the circuit (not hardcoded).
 
-import type { ThieleSmallParams, FrequencyDataPoint } from '@/types';
+import { RHO0, C0, pistonRadiationImpedance, pressureMagHalfSpace, pascalsToDbSpl } from '../acoustics';
+import {
+  acousticCompliance,
+  complianceImpedance,
+  solveDriver,
+  zParallel,
+  zSeries,
+} from '../lumped';
+import { cmag, cdiv, cmul, csub, cplx, type Complex } from '../complex';
+import { deriveDriverModel } from '../driver';
+import type { ThieleSmallParams } from '@/types';
 
-/**
- * Calculate passive radiator enclosure response.
- *
- * The PR system is a 4th-order system like ported, but:
- * - The port mass Mmp is replaced by the PR's Mmp + added mass
- * - The PR has compliance Cmp = 1 / ((2*pi*Fs_pr)² * Mmp)
- * - The PR's own resonance creates a notch above the tuning frequency
- *
- * @param driverTs   Driver Thiele/Small parameters
- * @param vb         Box volume [L]
- * @param prFs       PR free-air resonance [Hz]
- * @param prSd       PR effective cone area [cm²]
- * @param prMms      PR moving mass [g] (including added mass)
- * @param freqs      Frequency array [Hz]
- * @returns Response curve in dB (relative to passband)
- */
-export function calcPassiveRadiator(
-  driverTs: ThieleSmallParams,
-  vb: number,
-  prFs: number,
-  _prSd: number,
-  _prMms: number,
-  freqs: number[],
-): FrequencyDataPoint[] {
-  const sd = (driverTs.sd ?? 0) / 10000; // cm² to m²
-  const mms = (driverTs.mms ?? 10) / 1000; // g to kg
-  const cms = 1 / ((2 * Math.PI * driverTs.fs) ** 2 * mms); // m/N
-  const vbM3 = vb * 1e-3; // L to m³
-
-  // Box compliance seen by driver
-  const cab = vbM3 / (RHO_0 * C * C); // acoustic compliance
-  const cas = cms * sd * sd; // driver acoustic compliance
-  const alpha = cas / cab;
-
-  // PR acoustic mass and compliance
-  
-   // acoustic compliance
-
-  // System frequencies
-  const ws = 2 * Math.PI * driverTs.fs;
-  const wpr = 2 * Math.PI * prFs;
-
-  return freqs.map((f) => {
-    const w = 2 * Math.PI * f;
-    // s = jw (Laplace variable) — we work with real-valued approximations
-    // since JS has no native complex numbers
-
-    // 4th-order system with PR
-    // Transfer function (simplified from Small's PR analysis):
-    // The PR adds a notch at its own resonance frequency
-    const s2 = w * w;
-    
-    const ws2 = ws * ws;
-    const wpr2 = wpr * wpr;
-
-    // Normalized frequency ratios
-    const fn2 = s2 / ws2;
-    const fn4 = fn2 * fn2;
-    const fnPR2 = s2 / wpr2;
-
-    // System denominator (4th order)
-    const qts = driverTs.qts;
-    const denom =
-      fn4 +
-      (1 / qts) * Math.sqrt(fn4 * (wpr2 / ws2)) +
-      (1 + alpha + (alpha * wpr2) / (ws2 * qts * qts)) * fn2 +
-      (alpha / qts) * Math.sqrt(fn2 * (wpr2 / ws2)) +
-      alpha * alpha * (wpr2 / ws2);
-
-    // Numerator: for PR system, response = s²*(s² + wpr²) / denom
-    // This gives a notch at the PR's own resonance
-    const numer = fn2 * Math.abs(fn2 - fnPR2);
-
-    if (denom < 1e-30) return { freq: f, magnitude: -200 };
-
-    // Response in dB relative to passband
-    const ratio = Math.sqrt(numer / denom);
-    const db = 20 * Math.log10(ratio + 1e-30);
-
-    return { freq: f, magnitude: db };
-  });
+export interface PassiveRadiatorParams {
+  /** PR free-air resonance [Hz] (with any added mass already included) */
+  fp: number;
+  /** PR equivalent volume [L] (Vap = Cmp·Sdp²·ρ₀c²) */
+  vap: number;
+  /** PR effective area [cm²] */
+  sdp: number;
+  /** PR mechanical Q (typically 2–10). Default 5. */
+  qmp?: number;
+  /** PR max linear excursion [mm] for the excursion check */
+  xmaxPr?: number;
 }
 
-const RHO_0 = 1.225; // air density [kg/m³]
-const C = 343; // speed of sound [m/s]
+export interface PassiveRadiatorResult {
+  freqs: number[];
+  spl: number[];
+  splCone: number[];
+  splPr: number[];
+  excursionMm: number[];
+  /** PR diaphragm excursion [mm peak] */
+  prExcursionMm: number[];
+  impedance: number[];
+  /** System tuning (box + PR) [Hz] */
+  fbActual: number;
+  /** The PR's own free resonance [Hz] — response notch here */
+  notchFreq: number;
+  /** True if PR displacement volume ≥ 2× driver displacement volume (SPEC §4.4) */
+  prDisplacementOk: boolean;
+}
+
+export function simulatePassiveRadiator(
+  ts: ThieleSmallParams,
+  vbLiters: number,
+  pr: PassiveRadiatorParams,
+  freqs: number[],
+  voltage: number = 2.83,
+): PassiveRadiatorResult {
+  const dm = deriveDriverModel(ts);
+  const vb = vbLiters / 1e3;
+  const sdp = pr.sdp / 1e4; // cm² → m²
+  const qmp = pr.qmp ?? 5;
+
+  // PR acoustic elements from fp + Vap
+  const vap = pr.vap / 1e3;
+  const capPr = acousticCompliance(vap, RHO0, C0); // [m⁵/N] acoustic compliance
+  const wp = 2 * Math.PI * pr.fp;
+  const mapPr = 1 / (wp * wp * capPr); // acoustic mass [kg/m⁴]
+  const rapPr = (wp * mapPr) / qmp; // acoustic loss
+
+  const cab = acousticCompliance(vb, RHO0, C0);
+
+  // System tuning: PR mass against series combination of box + PR compliances
+  const cSeries = (cab * capPr) / (cab + capPr);
+  const fbActual = (1 / (2 * Math.PI)) * Math.sqrt(1 / (mapPr * cSeries));
+
+  const spl: number[] = [];
+  const splCone: number[] = [];
+  const splPr: number[] = [];
+  const excursionMm: number[] = [];
+  const prExcursionMm: number[] = [];
+  const impedance: number[] = [];
+
+  for (const f of freqs) {
+    const w = 2 * Math.PI * f;
+
+    // PR branch: mass + loss + own compliance + radiation load
+    const zPrRad = pistonRadiationImpedance(f, sdp);
+    const zPrBranch = zSeries(
+      cplx(rapPr, w * mapPr - 1 / (w * capPr)),
+      zPrRad,
+    );
+
+    // Rear network: Cab ∥ PR branch (leak loss QL=7 like vented)
+    const zCab = complianceImpedance(f, cab);
+    const wb = 2 * Math.PI * fbActual;
+    const ral = 7 / (wb * cab);
+    const zaRear = zParallel(zCab, cplx(ral, 0), zPrBranch);
+
+    const zaFront = pistonRadiationImpedance(f, dm.sd);
+    const sol = solveDriver(dm, f, zaFront, zaRear, voltage);
+
+    const pBox = cmul(zaRear, sol.ud);
+    const uPr = cdiv(pBox, zPrBranch);
+    const uNet: Complex = csub(sol.ud, uPr);
+
+    spl.push(pascalsToDbSpl(pressureMagHalfSpace(f, cmag(uNet), 1)));
+    splCone.push(pascalsToDbSpl(pressureMagHalfSpace(f, cmag(sol.ud), 1)));
+    splPr.push(pascalsToDbSpl(pressureMagHalfSpace(f, cmag(uPr), 1)));
+    excursionMm.push(cmag(sol.x) * 1e3);
+    prExcursionMm.push((cmag(uPr) / (w * sdp)) * 1e3);
+    impedance.push(cmag(sol.ze));
+  }
+
+  // SPEC §4.4: PR displacement volume should be ≥ 2× driver's Vd
+  const vdDriver = dm.sd * dm.xmax;
+  const vdPr = sdp * ((pr.xmaxPr ?? 10) / 1e3);
+  const prDisplacementOk = vdPr >= 2 * vdDriver;
+
+  return {
+    freqs,
+    spl,
+    splCone,
+    splPr,
+    excursionMm,
+    prExcursionMm,
+    impedance,
+    fbActual,
+    notchFreq: pr.fp,
+    prDisplacementOk,
+  };
+}

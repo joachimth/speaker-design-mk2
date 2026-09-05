@@ -1,118 +1,90 @@
-// Bandpass enclosure model (4th and 6th order).
-//
-// 4th-order bandpass: driver between two chambers (sealed rear + ported front).
-// 6th-order bandpass: driver between two ported chambers.
-//
-// The transfer-matrix approach models both chambers and ports.
-//
-// References: Dickason, "Loudspeaker Design Cookbook"; Small (1973).
+// 4th-order bandpass box on the shared lumped-element core (SPEC §4.5).
+// Rear chamber sealed (Cab_r), front chamber (Cab_f) vented to the outside.
+// Radiated output is the FRONT PORT only — the cone is buried.
+// Output is bandpass-shaped: sealed rear rolls off the bottom, front
+// chamber low-passes the top. Both emerge from the circuit.
 
-import type { FrequencyDataPoint } from '@/types';
+import { RHO0, C0, pistonRadiationImpedance, pressureMagHalfSpace, pascalsToDbSpl } from '../acoustics';
+import {
+  acousticCompliance,
+  complianceImpedance,
+  massImpedance,
+  solveDriver,
+  zParallel,
+  zSeries,
+} from '../lumped';
+import { cmag, cdiv, cmul, cplx } from '../complex';
+import { deriveDriverModel } from '../driver';
+import { portEndCorrection } from './vented';
+import type { ThieleSmallParams } from '@/types';
 
-
-
-
-export interface BandpassParams {
-  order: 4 | 6;
-  driverVas: number;    // [L]
-  driverFs: number;     // [Hz]
-  driverQts: number;
-  driverSd: number;     // [cm²]
-  rearVolume: number;   // [L] (Vr)
-  frontVolume: number;  // [L] (Vf)
-  frontPortFreq?: number; // [Hz] tuning for front chamber port (6th order only)
-  rearPortFreq?: number;  // [Hz] tuning for rear chamber port (6th order only)
+export interface Bandpass4Result {
+  freqs: number[];
+  /** System output (front port) [dB SPL @1 m, half-space] */
+  spl: number[];
+  /** Cone excursion [mm peak] */
+  excursionMm: number[];
+  /** Front port air velocity [m/s peak] */
+  portVelocity: number[];
+  impedance: number[];
+  /** Front chamber Helmholtz tuning [Hz] */
+  fbFront: number;
+  /** Rear chamber driver resonance [Hz] */
+  fcRear: number;
 }
 
-export interface BandpassResult {
-  response: FrequencyDataPoint[];
-  fLow: number;   // lower -3dB frequency
-  fHigh: number;  // upper -3dB frequency
-  bandwidth: number; // [Hz]
-  centerFreq: number; // [Hz]
-}
-
-/**
- * Calculate bandpass enclosure response.
- */
-export function calcBandpass(
-  params: BandpassParams,
+export function simulateBandpass4(
+  ts: ThieleSmallParams,
+  vRearLiters: number,
+  vFrontLiters: number,
+  portAreaCm2: number,
+  portLengthMm: number,
   freqs: number[],
-): BandpassResult {
-  const { order, driverVas, driverFs, driverQts, rearVolume: Vr, frontVolume: Vf } = params;
-  const vas = driverVas * 1e-3; // L to m³
-  const vr = Vr * 1e-3;
-  const vf = Vf * 1e-3;
+  voltage: number = 2.83,
+): Bandpass4Result {
+  const dm = deriveDriverModel(ts);
+  const vr = vRearLiters / 1e3;
+  const vf = vFrontLiters / 1e3;
+  const sp = portAreaCm2 / 1e4;
+  const lEff = portLengthMm / 1e3 + portEndCorrection(sp, false);
 
-  const ws = 2 * Math.PI * driverFs;
-  const alpha_r = vas / vr; // rear chamber alpha
-  const alpha_f = vas / vf; // front chamber alpha
+  const cabR = acousticCompliance(vr, RHO0, C0);
+  const cabF = acousticCompliance(vf, RHO0, C0);
+  const map = (RHO0 * lEff) / sp;
 
-  const response: FrequencyDataPoint[] = [];
+  const fbFront = (1 / (2 * Math.PI)) * Math.sqrt(1 / (map * cabF));
+  const alphaR = dm.vas / vr;
+  const fcRear = dm.fs * Math.sqrt(1 + alphaR);
+
+  const wbF = 2 * Math.PI * fbFront;
+  const rap = 1 / (wbF * cabF * 20); // port loss QP≈20
+  const ralF = 7 / (wbF * cabF); // front leak QL≈7
+
+  const spl: number[] = [];
+  const excursionMm: number[] = [];
+  const portVelocity: number[] = [];
+  const impedance: number[] = [];
 
   for (const f of freqs) {
-    const w = 2 * Math.PI * f;
-    const fn2 = (w / ws) ** 2;
-    const fn4 = fn2 * fn2;
+    // Rear load: sealed chamber
+    const zaRear = complianceImpedance(f, cabR);
 
-    if (order === 4) {
-      // 4th-order bandpass: sealed rear + ported front
-      // Transfer function (simplified from Dickason):
-      // H(s) = s² * alpha_f / (s⁴ + a3*s³ + a2*s² + a1*s + a0)
-      const a3 = 1 / driverQts;
-      const a2 = 1 + alpha_r + alpha_f + alpha_r * alpha_f / driverQts ** 2;
-      const a1 = alpha_r * alpha_f / driverQts;
-      const a0 = alpha_r * alpha_f;
+    // Front load: chamber compliance ∥ leak ∥ (port mass + loss + radiation)
+    const zPortBranch = zSeries(massImpedance(f, map), cplx(rap, 0), pistonRadiationImpedance(f, sp));
+    const zCabF = complianceImpedance(f, cabF);
+    const zaFront = zParallel(zCabF, cplx(ralF, 0), zPortBranch);
 
-      const denom = fn4 + a3 * Math.sqrt(fn4) + a2 * fn2 + a1 * Math.sqrt(fn2) + a0;
-      const numer = fn2 * alpha_f;
+    const sol = solveDriver(dm, f, zaFront, zaRear, voltage);
 
-      if (denom < 1e-30) {
-        response.push({ freq: f, magnitude: -200 });
-      } else {
-        const ratio = Math.sqrt(numer / denom);
-        response.push({ freq: f, magnitude: 20 * Math.log10(ratio + 1e-30) });
-      }
-    } else {
-      // 6th-order bandpass: both chambers ported
-      const fp = params.frontPortFreq ?? driverFs * 0.7;
-      
-      const wp = 2 * Math.PI * fp;
-      
-      const fn2p = (w / wp) ** 2;
-      
+    // Front chamber pressure → port volume velocity (the only radiator)
+    const pFront = cmul(zaFront, sol.ud);
+    const uPort = cdiv(pFront, zPortBranch);
 
-      // Simplified 6th-order response using real-valued approximations
-      // (full complex computation would need the complex.ts helpers)
-      
-      const frontMag = fn2p / Math.sqrt((1 - fn2p) ** 2 + (fn2p / 10) ** 2);
-      const driverMag = 1 / Math.sqrt((fn2 - 1) ** 2 + (fn2 / driverQts) ** 2);
-
-      const totalResponse = driverMag * frontMag * 10;
-      response.push({ freq: f, magnitude: 20 * Math.log10(totalResponse + 1e-30) });
-    }
+    spl.push(pascalsToDbSpl(pressureMagHalfSpace(f, cmag(uPort), 1)));
+    excursionMm.push(cmag(sol.x) * 1e3);
+    portVelocity.push(cmag(uPort) / sp);
+    impedance.push(cmag(sol.ze));
   }
 
-  // Find -3dB frequencies
-  const maxDb = Math.max(...response.map((p) => p.magnitude));
-  const minus3 = maxDb - 3;
-  let fLow = freqs[0]!;
-  let fHigh = freqs[freqs.length - 1]!;
-  let foundLow = false;
-
-  for (const p of response) {
-    if (!foundLow && p.magnitude >= minus3) {
-      fLow = p.freq;
-      foundLow = true;
-    }
-    if (foundLow && p.magnitude < minus3) {
-      fHigh = p.freq;
-      break;
-    }
-  }
-
-  const bandwidth = fHigh - fLow;
-  const centerFreq = Math.sqrt(fLow * fHigh);
-
-  return { response, fLow, fHigh, bandwidth, centerFreq };
+  return { freqs, spl, excursionMm, portVelocity, impedance, fbFront, fcRear };
 }

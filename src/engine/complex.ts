@@ -81,3 +81,24 @@ export function biquadResponse(
 
   return cdiv(numerator, denominator);
 }
+
+/** Complex reciprocal 1/z */
+export const cinv = (z: Complex): Complex => {
+  const d = z.re * z.re + z.im * z.im || 1e-300;
+  return { re: z.re / d, im: -z.im / d };
+};
+
+/** Complex hyperbolic cosine: cosh(x+jy) = cosh(x)cos(y) + j·sinh(x)sin(y) */
+export const ccosh = (z: Complex): Complex => ({
+  re: Math.cosh(z.re) * Math.cos(z.im),
+  im: Math.sinh(z.re) * Math.sin(z.im),
+});
+
+/** Complex hyperbolic sine: sinh(x+jy) = sinh(x)cos(y) + j·cosh(x)sin(y) */
+export const csinh = (z: Complex): Complex => ({
+  re: Math.sinh(z.re) * Math.cos(z.im),
+  im: Math.cosh(z.re) * Math.sin(z.im),
+});
+
+/** Parallel combination of two complex impedances: (a·b)/(a+b) */
+export const cparallel = (a: Complex, b: Complex): Complex => cdiv(cmul(a, b), cadd(a, b));

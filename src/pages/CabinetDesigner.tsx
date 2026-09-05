@@ -11,6 +11,7 @@ import { LinkwitzTransformCard } from '@/components/LinkwitzTransformCard'
 import { MultiSubAlignmentCard } from '@/components/MultiSubAlignmentCard'
 import { NextStep } from '@/components/NextStep'
 import type { DriverPlacement } from '@/components/Cabinet3DBuilder'
+import { ExcursionPortCard } from '@/components/ExcursionPortCard'
 const Cabinet3DBuilder = lazy(() => import('@/components/Cabinet3DBuilder').then(m => ({ default: m.Cabinet3DBuilder })))
 import {
   calcSealed,
@@ -374,6 +375,22 @@ export default function CabinetDesigner() {
             for at udstrække basresponsen. Brug baffelstep-beregningen under Simulering.
           </div>
         </Card>
+      )}
+
+      {/* Excursion & port — full lumped-element engine (SPEC §4.9 + §8) */}
+      {selectedDriver?.tsParams && (
+        (cabinetType === 'sealed' && sealedResult) ||
+        (cabinetType === 'ported' && portedResult && portResult)
+      ) && (
+        <ExcursionPortCard
+          driver={selectedDriver}
+          cabinetType={cabinetType}
+          vb={cabinetType === 'sealed' ? sealedResult!.vb : portedResult!.vb}
+          fb={cabinetType === 'ported' ? portedResult!.fb : undefined}
+          portDiameterMm={portDiameter}
+          portLengthMm={portResult?.portLength ?? 150}
+          numPorts={numPorts}
+        />
       )}
 
       {/* Linkwitz Transform for sealed cabinets */}

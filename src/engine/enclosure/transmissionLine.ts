@@ -1,169 +1,180 @@
-// Transmission line enclosure model using 1D transfer-matrix approach.
+// Transmission line on the shared lumped-element core (SPEC §4.6).
+// 1D waveguide: the line is segmented; each segment gets a COMPLEX
+// transfer matrix with propagation constant Γ = α + jk where α models
+// stuffing damping and cEff models the stuffing's velocity reduction
+// (King/Augspurger approach). The driver can sit at an offset along the
+// line (mass-loaded TL): the section behind the driver acts as a closed
+// stub in parallel with the main line to the terminus.
 //
-// The line is divided into segments, each with area, length, and stuffing
-// density. The transfer matrix for each segment accounts for:
-// - Complex wave number (includes stuffing damping and velocity reduction)
-// - Area changes (taper)
+// The driver load is the ACTUAL line input impedance from the T-matrix —
+// not an approximation — so line resonances load the cone correctly.
 //
-// The driver can be placed at any point along the line (offset-driver / ML-TL).
-//
-// Output: driver response, terminus response, and summed response.
-//
-// References: King ("Loudspeaker Voice" articles), Augspurger (JAES 2000).
+// Stuffing coefficients are empirical approximations (marked below) and
+// are calibration targets for Hornresp golden tests (SPEC §10).
 
-import type { FrequencyDataPoint } from '@/types';
-
-const C = 343; // speed of sound [m/s]
-const RHO_0 = 1.225; // air density [kg/m³]
+import { RHO0, C0, pistonRadiationImpedance, pressureMagHalfSpace, pascalsToDbSpl } from '../acoustics';
+import {
+  solveDriver,
+  zParallel,
+  ductSegmentT,
+  tMultiply,
+  tInputImpedance,
+  tOutputVolumeVelocity,
+  IDENTITY_T,
+  type TMatrix,
+} from '../lumped';
+import { cmag, cdiv, cmul, csub, type Complex } from '../complex';
+import { deriveDriverModel } from '../driver';
+import type { ThieleSmallParams } from '@/types';
 
 export interface TLSegment {
   length: number; // [m]
   areaStart: number; // [m²]
   areaEnd: number; // [m²]
-  stuffingDensity: number; // [kg/m³] (0 = empty, ~5-10 = light, ~20-30 = heavy)
+  /** Stuffing density [kg/m³]: 0 = empty, 5–10 = light, 15–30 = heavy */
+  stuffingDensity: number;
 }
 
 export interface TLResult {
-  driverResponse: FrequencyDataPoint[];
-  terminusResponse: FrequencyDataPoint[];
-  summedResponse: FrequencyDataPoint[];
+  freqs: number[];
+  /** Summed system response [dB SPL @1 m half-space] */
+  spl: number[];
+  splDriver: number[];
+  splTerminus: number[];
+  excursionMm: number[];
+  impedance: number[];
+  /** First quarter-wave resonance of the stuffed line [Hz] */
+  fQuarterWave: number;
 }
 
-/**
- * Calculate transmission line response.
- *
- * @param segments     Line segments (from driver to terminus)
- * @param driverFs     Driver free-air resonance [Hz]
- * @param driverQts    Driver total Q
- * @param driverVas    Driver equivalent volume [L]
- * @param driverSd     Driver effective area [cm²]
- * @param freqs        Frequency array [Hz]
- * @returns Driver, terminus, and summed responses in dB
- */
-export function calcTransmissionLine(
+export interface TLOptions {
+  /**
+   * Driver position as fraction of total line length from the closed end.
+   * 0 = at the closed end (classic TL), 0.2–0.35 typical offset (ML-TL).
+   */
+  driverOffsetFraction?: number;
+  voltage?: number;
+}
+
+// Empirical stuffing model (calibration targets, SPEC §10):
+// velocity reduction ~1–2 %/(kg/m³), damping grows with density and √f.
+function stuffingCEff(density: number): number {
+  return C0 / (1 + 0.018 * density);
+}
+function stuffingAlpha(density: number, f: number): number {
+  return 0.0012 * density * Math.sqrt(f); // [1/m]
+}
+
+function segmentTMatrix(f: number, seg: TLSegment): TMatrix {
+  const avgArea = (seg.areaStart + seg.areaEnd) / 2;
+  const cEff = stuffingCEff(seg.stuffingDensity);
+  const alpha = stuffingAlpha(seg.stuffingDensity, f);
+  return ductSegmentT(f, seg.length, avgArea, alpha, cEff, RHO0);
+}
+
+/** Split segments at a fractional position along the total length */
+function splitSegments(segments: TLSegment[], fraction: number): { stub: TLSegment[]; main: TLSegment[] } {
+  const total = segments.reduce((s, seg) => s + seg.length, 0);
+  const splitAt = total * Math.min(Math.max(fraction, 0), 0.95);
+  const stub: TLSegment[] = [];
+  const main: TLSegment[] = [];
+  let acc = 0;
+  for (const seg of segments) {
+    if (acc + seg.length <= splitAt) {
+      stub.push(seg);
+    } else if (acc >= splitAt) {
+      main.push(seg);
+    } else {
+      const stubLen = splitAt - acc;
+      const tArea = seg.areaStart + (seg.areaEnd - seg.areaStart) * (stubLen / seg.length);
+      stub.push({ ...seg, length: stubLen, areaEnd: tArea });
+      main.push({ ...seg, length: seg.length - stubLen, areaStart: tArea });
+    }
+    acc += seg.length;
+  }
+  return { stub, main };
+}
+
+export function simulateTransmissionLine(
+  ts: ThieleSmallParams,
   segments: TLSegment[],
-  driverFs: number,
-  driverQts: number,
-  driverVas: number,
-  driverSd: number,
   freqs: number[],
+  opts: TLOptions = {},
 ): TLResult {
-  const sd = driverSd / 10000; // cm² to m²
-  const vas = driverVas * 1e-3; // L to m³
-  const totalLength = segments.reduce((s, seg) => s + seg.length, 0);
+  const dm = deriveDriverModel(ts);
+  const voltage = opts.voltage ?? 2.83;
+  const offset = opts.driverOffsetFraction ?? 0;
 
-  // Quarter-wave frequency (first line resonance)
-  
+  const { stub, main } = splitSegments(segments, offset);
+  const terminusArea = segments[segments.length - 1]!.areaEnd;
 
-  const driverResponse: FrequencyDataPoint[] = [];
-  const terminusResponse: FrequencyDataPoint[] = [];
-  const summedResponse: FrequencyDataPoint[] = [];
+  // Effective quarter-wave frequency (stuffing-slowed average c)
+  const totalLen = segments.reduce((s, seg) => s + seg.length, 0);
+  const cAvg =
+    segments.reduce((s, seg) => s + stuffingCEff(seg.stuffingDensity) * seg.length, 0) / totalLen;
+  const fQuarterWave = cAvg / (4 * totalLen);
+
+  const spl: number[] = [];
+  const splDriver: number[] = [];
+  const splTerminus: number[] = [];
+  const excursionMm: number[] = [];
+  const impedance: number[] = [];
 
   for (const f of freqs) {
-    const w = 2 * Math.PI * f;
+    // Main line T-matrix (driver → terminus), terminated by radiation
+    let tMain = IDENTITY_T;
+    for (const seg of main) {
+      tMain = tMultiply(tMain, segmentTMatrix(f, seg));
+    }
+    const zTerm = pistonRadiationImpedance(f, terminusArea);
+    const zMainIn = tInputImpedance(tMain, zTerm);
 
-    // Propagation through each segment using transfer matrices
-    // For a segment with area A, length L, and stuffing:
-    //   Complex wave number: k' = k * (1 - j * damping_factor)
-    //   where damping_factor depends on stuffing density
-    //   Characteristic impedance: Z0 = rho_0 * c / A
-
-    let totalMatrix = { a: 1, b: 0, c: 0, d: 1 }; // identity matrix
-
-    for (const seg of segments) {
-      const avgArea = (seg.areaStart + seg.areaEnd) / 2;
-      const stuffingFactor = seg.stuffingDensity > 0
-        ? 1 + seg.stuffingDensity * 0.03 // approximate velocity reduction
-        : 1;
-      const cEff = C / stuffingFactor;
-      const k = w / cEff;
-      const damping = seg.stuffingDensity * 0.01; // approximate damping
-      const kComplex_re = k;
-      const kComplex_im = -damping * k;
-
-      // Transfer matrix for a tube segment:
-      // [cos(kL)    j*Z0*sin(kL)]
-      // [j/Z0*sin(kL)  cos(kL)  ]
-      const kL_re = kComplex_re * seg.length;
-      const kL_im = kComplex_im * seg.length;
-
-      // cos(kL) and sin(kL) with complex argument
-      const cosKL = Math.cos(kL_re) * Math.cosh(-kL_im) -
-                    Math.sin(kL_re) * Math.sinh(-kL_im) * 0; // simplified
-      const sinKL = Math.sin(kL_re) * Math.cosh(-kL_im);
-
-      const z0 = RHO_0 * cEff / avgArea;
-
-      const segMatrix = {
-        a: cosKL,
-        b: z0 * sinKL,
-        c: sinKL / z0,
-        d: cosKL,
-      };
-
-      // Multiply matrices: result = totalMatrix * segMatrix
-      const newA = totalMatrix.a * segMatrix.a + totalMatrix.b * segMatrix.c;
-      const newB = totalMatrix.a * segMatrix.b + totalMatrix.b * segMatrix.d;
-      const newC = totalMatrix.c * segMatrix.a + totalMatrix.d * segMatrix.c;
-      const newD = totalMatrix.c * segMatrix.b + totalMatrix.d * segMatrix.d;
-      totalMatrix = { a: newA, b: newB, c: newC, d: newD };
+    // Closed stub behind the driver (if offset): Z = A/C (Z_L = ∞)
+    let zaRear: Complex;
+    let zStub: Complex | null = null;
+    if (stub.length > 0) {
+      let tStub = IDENTITY_T;
+      for (const seg of stub) {
+        tStub = tMultiply(tStub, segmentTMatrix(f, seg));
+      }
+      zStub = cdiv(tStub.a, tStub.c); // closed-end input impedance
+      zaRear = zParallel(zStub, zMainIn);
+    } else {
+      zaRear = zMainIn;
     }
 
-    // Terminus radiation impedance (simplified piston in baffle)
-    const terminusArea = segments[segments.length - 1]!.areaEnd;
-    const zTerminus = RHO_0 * C / terminusArea;
+    const zaFront = pistonRadiationImpedance(f, dm.sd);
+    const sol = solveDriver(dm, f, zaFront, zaRear, voltage);
 
-    // Line input impedance at driver position
-    const zLine = (totalMatrix.b + totalMatrix.a * zTerminus) /
-                  (totalMatrix.d + totalMatrix.c * zTerminus);
+    // Volume velocity into the main line: current divider between stub and main
+    let uIntoMain: Complex;
+    if (zStub) {
+      // p_rear = Zrear·Ud ; U_main = p_rear / Z_main
+      const pRear = cmul(zaRear, sol.ud);
+      uIntoMain = cdiv(pRear, zMainIn);
+    } else {
+      uIntoMain = sol.ud;
+    }
 
-    // Driver response (simplified: driver sees line impedance as box load)
-    
-    const alpha = vas / (totalLength * segments[0]!.areaStart); // rough Vb estimate
-    const driverDb = computeDriverLoad(f, driverFs, driverQts, alpha, Math.abs(zLine));
+    // Terminus volume velocity through the chain
+    const uTerm = tOutputVolumeVelocity(tMain, uIntoMain, zTerm);
 
-    // Terminus response (pressure at line output)
-    const terminusDb = computeTerminusOutput(f, totalLength, C, 1, terminusArea, sd);
+    // Net radiated: cone front − terminus (cancels at DC like an open duct)
+    const uNet = csub(sol.ud, uTerm);
 
-    // Summed: driver direct + terminus with delay
-    const delay = totalLength / C; // propagation delay [s]
-    const phaseDelay = 2 * Math.PI * f * delay;
-    const driverLin = Math.pow(10, driverDb / 20);
-    const terminusLin = Math.pow(10, terminusDb / 20) * Math.cos(phaseDelay);
-    const sumLin = driverLin + terminusLin;
-    const sumDb = 20 * Math.log10(Math.abs(sumLin) + 1e-30);
-
-    driverResponse.push({ freq: f, magnitude: driverDb });
-    terminusResponse.push({ freq: f, magnitude: terminusDb });
-    summedResponse.push({ freq: f, magnitude: sumDb });
+    spl.push(pascalsToDbSpl(pressureMagHalfSpace(f, cmag(uNet), 1)));
+    splDriver.push(pascalsToDbSpl(pressureMagHalfSpace(f, cmag(sol.ud), 1)));
+    splTerminus.push(pascalsToDbSpl(pressureMagHalfSpace(f, cmag(uTerm), 1)));
+    excursionMm.push(cmag(sol.x) * 1e3);
+    impedance.push(cmag(sol.ze));
   }
 
-  return { driverResponse, terminusResponse, summedResponse };
+  return { freqs, spl, splDriver, splTerminus, excursionMm, impedance, fQuarterWave };
 }
 
-
-function computeDriverLoad(f: number, fs: number, qts: number, alpha: number, _zLineMag: number): number {
-  const ws = 2 * Math.PI * fs;
-  const w = 2 * Math.PI * f;
-  const fn2 = (w / ws) ** 2;
-  const fn4 = fn2 * fn2;
-
-  // Simplified response with line loading (approximates 4th-order system)
-  const denom = fn4 + (1 / qts) * Math.sqrt(fn4) + (1 + alpha) * fn2 + alpha * alpha / (qts * qts);
-  const numer = fn2;
-  if (denom < 1e-30) return -200;
-  const ratio = Math.sqrt(numer / denom);
-  return 20 * Math.log10(ratio + 1e-30);
+/** Seed geometry (SPEC §4.6): quarter-wave length for a target frequency */
+export function quarterWaveLength(fTarget: number, stuffingDensity: number = 8): number {
+  return stuffingCEff(stuffingDensity) / (4 * fTarget);
 }
 
-function computeTerminusOutput(f: number, length: number, cEff: number, _stuffFactor: number, terminusArea: number, sd: number): number {
-  // Terminus output: peaks at quarter-wave and odd harmonics
-  const fQuarter = cEff / (4 * length);
-  const ratio = f / fQuarter;
-  // Quarter-wave pipe: output peaks at f = (2n+1) * fQuarter
-  // Simplified: peaks at odd multiples of fQuarter
-  const response = Math.abs(Math.sin(Math.PI * ratio / 2)) / (1 + ratio * 0.1);
-  // Scale by area ratio
-  const areaScale = sd / terminusArea;
-  return 20 * Math.log10(response * areaScale + 1e-30);
-}
+export { stuffingCEff, stuffingAlpha };

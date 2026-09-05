@@ -1,171 +1,42 @@
-# TODO
+# TODO — aktuel arbejdsliste
 
-## Phase 1: Foundation (MVP)
+Langsigtet status mod spec: se [ROADMAP.md](ROADMAP.md). Krav: [docs/SPEC.md](docs/SPEC.md).
 
-### Project setup
-- [x] Repository structure
-- [x] Vite + React + TypeScript scaffold
-- [x] Tailwind CSS
-- [x] CI/CD GitHub Pages
-- [x] Dockerfile
+## Igangværende: reparation efter spec-audit (5. sep 2026)
 
-### Types & storage
-- [x] TypeScript type definitions (Driver, Cabinet, Project, Crossover)
-- [x] Dexie IndexedDB setup
-- [x] Zustand stores (driver, project)
+### Fase A — Integritet
+- [x] SPEC.md ind i repoet som autoritativt kravdokument
+- [x] README/ROADMAP/TODO genskrevet så de beskriver mk2, ikke mk1
+- [x] index.html title → "Speaker Design 4 All"
+- [x] ProjectOverview routet igen (projekter kunne ikke indlæses/administreres)
+- [x] Dark mode-toggle gendannet (regression fra mk1)
+- [x] Enheds-toggle (mm/tommer) gendannet (regression fra mk1)
+- [x] Seed-drivere: upsert i stedet for kun-manglende (regression fra mk1)
+- [x] "Seneste designs" på landingssiden (SPEC §7.1)
+- [x] CLAUDE.md: repo-layout med engine/ og korrekte kommandoer
 
-### PDF datasheet extraction
-- [x] PDF.js integration (text + image extraction)
-- [x] T/S parameter regex parser
-- [x] Frequency response graph digitizer (GraphDigitizer: manual + auto color-mask)
-- [x] Impedance curve extraction (GraphDigitizer impedance mode)
-- [x] Driver save/load to IndexedDB
+### Fase B — Ægte engine (testet, ikke facade)
+- [x] transmissionLine.ts omskrevet: kompleks T-matrix (brug engine/complex), driver-load fra faktisk linjeimpedans, kompleks summering, HF-asymptote korrekt → tests
+- [x] passiveRadiator.ts verificeret mod Small's PR-model → tests
+- [x] bandpass.ts 4. orden verificeret → tests
+- [x] horn.ts: mundimpedans (ikke udkommenteret), kompleks summering → tests
+- [x] portVelocity foldet ind i vented.ts (porthastighed = kanal fra samme kredsløb) → tests
+- [x] Nyt modul: excursion x(f) + maks-SPL (displacement + termisk) → tests
+- [x] Port-hastighed + excursion + maks-SPL i Kabinet-UI med 10/17 m/s advarsler (ExcursionPortCard)
+- [ ] Kabinettyper PR/bandpass/horn i UI + TL-editor på ny model (Fase C)
 
-### Driver database
-- [x] Pre-load 4 drivers from mk2 repo (GRS, ScanSpeak 15W, ScanSpeak H2606, SB26)
-- [x] Expanded to 34 drivers with real measured data (loudspeakerlab.com JSON + PDF)
-- [x] Driver manager UI (list, upload, edit, delete)
-- [x] Driver detail view (params, curves)
-- [x] Full off-axis data (10-90 deg) for newer additions
+### Fase C — Spec-features
+- [ ] Byggeark-eksport koblet til UI + tests
+- [ ] CamillaDSP-eksport koblet til UI + tests
+- [ ] Wizard Flow A (kabinet → drivere, 3 trin)
+- [ ] Wizard Flow B (fra bunden, 4 trin)
+- [ ] Dashboard-advarsler med "Anvend"-knap
+- [ ] T/S konsistenskontrol ved driverimport
+- [ ] Alignments (QB3/SBB4/C4/B4/EBS) som startpunkter
 
-## Phase 2: Cabinet Design
-
-### Thiele-Small calculations
-- [x] Sealed box calculator (Vb, Fc, Qtc, F3)
-- [x] Ported box calculator (Vb, Fb, F3, port dimensions)
-- [x] Transmission line calculator
-- [x] Cabinet type auto-recommendation (Qts-based)
-- [x] Cabinet parameter comparison view (CabinetComparisonCard)
-
-### Cabinet visualization
-- [x] Parametric 3D cabinet builder (Cabinet3DBuilder with Three.js)
-- [x] Driver placement on baffle (Cabinet3DBuilder drag-to-position)
-- [x] Internal volume calculation
-- [x] Baffle dimension editor
-- [x] STL export (stlExport.ts: binary STL with hollow box + driver cutouts)
-
-### Baffle step
-- [x] Baffle step diffraction model
-- [x] Baffle step compensation calculator
-- [x] Edge diffraction simulation
-
-## Phase 3: Acoustic Simulation
-
-### Frequency response
-- [x] Individual driver response (from datasheet curve)
-- [x] Combined system response
-- [x] Crossover simulation (LR4, BW4, LR2, etc.)
-- [x] Crossover designer UI (frequency, order, type per way)
-
-### Directivity
-- [x] On-axis + off-axis response
-- [x] Directivity index
-- [x] Vertical lobing analysis
-- [x] Polar diagram (horizontal + vertical)
-- [x] Polar map (frequency vs angle heatmap)
-
-### Spinorama
-- [x] On-axis
-- [x] Listening window (+/-10 deg H, +/-10 deg V)
-- [x] Early reflections
-- [x] Sound power
-- [x] Directivity index
-- [x] Predicted in-room response
-
-### Crossover optimization
-- [x] Auto-design: crossover freq + gain + delay from driver specs (autoDesign.ts)
-- [x] Auto-tune: gain/delay optimization
-- [x] Phase alignment fine-tuning UI (PhaseAlignmentCard)
-- [x] Manual driver delay calculation (time alignment UI) (TimeAlignmentCard component)
-
-## Phase 4: Advanced
-
-### Multi-way systems
-- [x] 2-way, 3-way, 4-way system designer (SystemSimulation.tsx)
-- [x] Driver assignment per band
-- [x] Push-push / push-pull configuration (driverCount field on DesignBand)
-
-### Cabinet Match + MiniDSP
-- [x] Driver matching from cabinet size + driver category (cabinetMatch.ts)
-- [x] MiniDSP 2x4 config generation
-- [x] Cabinet Match -> System Simulering handoff (projectStore.ts)
-
-### Room & cabinet acoustics
-- [x] In-room response simulation (roomAcoustics.ts)
-- [x] Cabinet response simulation (cabinetResponse.ts)
-- [x] Panel resonance analysis (panelResonance.ts)
-- [x] Break-in simulation (breakin.ts)
-- [x] Port tuning calculator
-
-### Waveguide designer
-- [x] Oblate spheroid (OS) waveguide parametric design (WaveguideDesigner.tsx)
-- [x] Waveguide profile visualization (3D lathe preview + 2D profile)
-- [x] Directivity control estimation (DI + coverage vs frequency plot)
-- [x] STL export (stlExport.ts: binary STL with hollow box + driver cutouts) for 3D printing
-
-### DSP export
-- [x] MiniDSP 2x4 config output (via Cabinet Match)
-- [x] Biquad coefficient export (LR2/4/8, BW2/4, 1st order at 48/96/44.1 kHz)
-- [x] Biquad text format (paste into MiniDSP advanced biquad input) + Q23 hex
-- [x] Biquad JSON export (structured format with q23hex fields)
-- [x] MiniDSP 4x10 HD config export (export4x10HD)
-- [x] REW measurement import (rewImport.ts parser + DriverManager UI)
-
-### Project management
-- [x] Save/load complete projects (IndexedDB via projectStore)
-- [x] Project export/import (JSON file download/upload)
-- [x] Design comparison (A/B projects) (DesignCompare.tsx page)
-
-## Phase 5: Polish
-
-- [x] Responsive design (mobile + desktop)
-- [x] Dark mode
-- [x] Unit preferences (metric/imperial) (settingsStore)
-- [x] Help/intro tour (HelpTour)
-- [x] Print-friendly views (@media print CSS)
-- [x] Performance optimization (web workers for simulation) (useSimulationWorker hook + simulationWorker.ts)
-
-## Phase 6: Optimization & Code Quality (Sep 1 review)
-
-### Performance
-- [x] Lazy-load Three.js via React.lazy + Suspense (Cabinet3DBuilder, WaveguideDesigner) - initial bundle 320KB -> 182KB gzipped
-- [x] Wire useSimulationWorker into SystemSimulation (per-band curve computation + summed response offloaded to Web Worker, 100ms debounce)
-- [x] Route-based code splitting (React.lazy for CabinetMatch, DesignCompare, SimulationView pages) - bundle 189KB -> 178KB gzipped
-- [x] Memoize driver database queries (driverMap via useMemo, all find() calls replaced with Map.get/has)
-
-### Bug fixes (Sep 1)
-- [x] Fix STL downloadSTL href bug (a.href was set to filename instead of blob URL)
-- [x] Fix degenerate quad in addHollowBox front wall (v1==v2 duplicate vertex)
-
-### Code quality
-- [x] Add React ErrorBoundary (ErrorBoundary.tsx wraps all routes)
-- [x] Replace 25 `any` types with proper types (pdf/extractor.ts, driverStore/projectStore catch blocks, simulationWorker casts, database.ts, GraphDigitizer, DriverManager)
-- [x] Fix database.ts mixed static+dynamic import warning (projectStore + SystemSimulation now use static imports)
-- [x] Add aria-labels for accessibility (added to unit toggle, cabinet type selectors, ways selector, subwoofer remove, parameter set selector)
-
-### Features to consider
-- [x] Driver frequency response smoothing (Psychoacoustic 1/N-octave smoothing, smoothing.ts)
-- [x] Crossover auto-optimization with target curve (targetCurve.ts: flat, Harman, tilted, custom)
-- [x] Impedance matching at crossover frequency (impedanceMatch.ts + ImpedanceMatchCard)
-- [x] Export simulation results as image/PNG (pngExport.ts, button on target curve plot)
-- [x] Multi-subwoofer alignment tool (multiSub.ts + MultiSubAlignmentCard in CabinetDesigner)
-- [x] Linkwitz transform for sealed enclosure equalization (linkwitzTransform.ts + LinkwitzTransformCard)
-
-### Sep 3 additions
-- [x] Crossover frequency sliders with linked bands + live phase display (CrossoverSlider.tsx)
-- [x] Separate "Auto delefilter" and "Auto fase/delay" buttons in SystemSimulation
-- [x] Target curve optimizer UI with smooth/flat/Harman/tilted selector + plot comparison
-
-### Sep 3 review & cleanup
-- [x] Fix 3-way Cabinet Match handoff: when no midrange found, fallback to 2-way with correct ways count
-- [x] Fix A/B Sammenligning: load projects on mount (was empty unless Overblik visited first)
-- [x] Add CrossoverSlider to SystemSimulation (was only in CrossoverDesigner)
-- [x] Multi-resolution target curve optimizer (1.0 → 0.5 → 0.25 → 0.1 dB steps, ~4x faster + more precise)
-- [x] Real-time deviation meter (RMS error vs target curve, color-coded progress bar)
-- [x] Guided workflow: "Næste" navigation buttons on each design tab (NextStep component)
-- [x] Rename "Simulering" tab to "Directivity" to avoid confusion with "System Sim."
-- [x] Remove duplicate ResponsivePlot components (shared component used everywhere, ~155 lines removed)
-- [x] Remove duplicate useEffect in SystemSimulation (auto-select drivers was defined twice)
-- [x] Remove dead loadedDesign state from projectStore (defined but never consumed)
-- [x] Fix unused catch variable in projectStore
-- [x] Improve overview workflow guide with clickable navigation to each step
+## Regler (fra Joachim, gælder al optimizer-kode)
+- Gains må KUN dæmpe, aldrig booste. Bånd 0 (woofer) altid låst på 0 dB.
+- Autooptimizer må ikke ændre kabinet/drivervalg — kun foreslå.
+- EQ kun på bånd med aktivt delefilter.
+- Sim-sti og optimizer-sti skal dele summering + resampling.
+- Tung CPU i Web Workers.

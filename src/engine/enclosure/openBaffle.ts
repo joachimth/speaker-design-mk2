@@ -1,101 +1,93 @@
-// Open baffle / dipole response model.
-// A driver on an open baffle radiates from both sides, creating a
-// dipole pattern with 6 dB/octave roll-off below the dipole peak.
+// Open baffle / dipole on the shared lumped-element core (SPEC §4.8).
+// The driver works in free air (radiation load both sides, no box), and
+// the far-field response is the monopole response times the dipole
+// path-difference factor |1 − e^(−jkD)| where D is the effective
+// front-to-back path around the baffle.
 //
-// The dipole peak frequency: f_peak = c / (2 * D_eff)
-// where D_eff is the effective path length around the baffle.
-// For a rectangular baffle with driver at center:
-//   D_eff ≈ sqrt((W/2)² + (H/2)²) (average half-baffle dimension)
-//
-// Below f_peak, response falls at 6 dB/oct.
-// Above f_peak, the response approaches the driver's normal response
-// (with baffle step still present).
+// Dipole peak at f ≈ c/(2·D_eff); 6 dB/oct roll-off below; comb ripple
+// above (physical, from the path difference).
 
-import type { FrequencyDataPoint } from '@/types';
+import { RHO0, C0, pistonRadiationImpedance, pressureMagHalfSpace, pascalsToDbSpl } from '../acoustics';
+import { solveDriver } from '../lumped';
+import { cmag, csub, cplx, cmul, fromPolar, type Complex } from '../complex';
+import { deriveDriverModel } from '../driver';
+import type { ThieleSmallParams } from '@/types';
 
-const C = 343000; // speed of sound [mm/s]
+export interface OpenBaffleResult {
+  freqs: number[];
+  /** On-axis dipole response [dB SPL @1 m] */
+  spl: number[];
+  /** Monopole (baffle-less driver) reference [dB SPL] */
+  splMonopole: number[];
+  excursionMm: number[];
+  impedance: number[];
+  /** Dipole peak frequency c/(2·Deff) [Hz] */
+  dipolePeakHz: number;
+  /** Effective acoustic path front→back [m] */
+  dEff: number;
+}
 
 /**
- * Calculate the dipole roll-off for an open baffle.
- *
- * @param baffleWidth   Baffle width [mm]
- * @param baffleHeight  Baffle height [mm]
- * @param driverXOffset Horizontal offset from center [mm] (0 = center)
- * @param driverYPos    Vertical position from top [mm] (optional)
- * @param freqs         Frequency array [Hz]
- * @returns Dipole transfer function in dB (0 dB at HF, rolls off below f_peak)
+ * Effective path length around a rectangular baffle for a driver at
+ * (x, y) measured from the baffle centre. Averages the four edge
+ * distances (simple geometric model; the numerical edge-diffraction
+ * model in SPEC §4.10 refines this per angle).
  */
-export function calcDipoleResponse(
-  baffleWidth: number,
-  baffleHeight: number,
-  freqs: number[],
-  driverXOffset: number = 0,
-  driverYPos?: number,
-): FrequencyDataPoint[] {
-  // Effective path length: average distance from driver to baffle edge
-  // through the shortest path around the baffle
-  const halfW = baffleWidth / 2;
-  const halfH = baffleHeight / 2;
+export function effectivePathLength(
+  baffleWidthM: number,
+  baffleHeightM: number,
+  driverX: number = 0,
+  driverY: number = 0,
+): number {
+  const dLeft = baffleWidthM / 2 + driverX;
+  const dRight = baffleWidthM / 2 - driverX;
+  const dTop = baffleHeightM / 2 - driverY;
+  const dBottom = baffleHeightM / 2 + driverY;
+  // Path = distance to edge + wrap to the rear (≈ same distance back)
+  const avgEdge = (dLeft + dRight + dTop + dBottom) / 4;
+  return 2 * avgEdge;
+}
 
-  let dEff: number;
-  if (driverXOffset !== 0 && driverYPos !== undefined) {
-    // Use minimum distance to any edge
-    const distLeft = halfW + driverXOffset;
-    const distRight = halfW - driverXOffset;
-    const distTop = driverYPos;
-    const distBottom = baffleHeight - driverYPos;
-    dEff = Math.min(distLeft, distRight, distTop, distBottom) * 2;
-  } else if (driverXOffset !== 0) {
-    const distLeft = halfW + driverXOffset;
-    const distRight = halfW - driverXOffset;
-    dEff = Math.min(distLeft, distRight) * 2;
-  } else {
-    // Centered driver: use diagonal average
-    dEff = Math.sqrt(halfW * halfW + halfH * halfH);
+export function simulateOpenBaffle(
+  ts: ThieleSmallParams,
+  baffleWidthM: number,
+  baffleHeightM: number,
+  freqs: number[],
+  voltage: number = 2.83,
+  driverX: number = 0,
+  driverY: number = 0,
+): OpenBaffleResult {
+  const dm = deriveDriverModel(ts);
+  const dEff = effectivePathLength(baffleWidthM, baffleHeightM, driverX, driverY);
+  const dipolePeakHz = C0 / (2 * dEff);
+
+  const spl: number[] = [];
+  const splMonopole: number[] = [];
+  const excursionMm: number[] = [];
+  const impedance: number[] = [];
+
+  for (const f of freqs) {
+    // Free-air driver: radiation load on both sides, no enclosure
+    const zaRad = pistonRadiationImpedance(f, dm.sd);
+    const sol = solveDriver(dm, f, zaRad, zaRad, voltage);
+
+    const k = (2 * Math.PI * f) / C0;
+    // Dipole factor: front minus delayed rear |1 − e^(−jkD)|
+    const rearPhase: Complex = fromPolar(1, -k * dEff);
+    const dipoleFactor = csub(cplx(1, 0), rearPhase);
+
+    const uMono = cmag(sol.ud);
+    const uDipole = cmag(cmul(sol.ud, dipoleFactor));
+
+    splMonopole.push(pascalsToDbSpl(pressureMagHalfSpace(f, uMono, 1)));
+    spl.push(pascalsToDbSpl(pressureMagHalfSpace(f, uDipole, 1)));
+    excursionMm.push(cmag(sol.x) * 1e3);
+    impedance.push(cmag(sol.ze));
   }
 
-  // Dipole peak frequency
-  const fPeak = C / (2 * dEff);
-
-  return freqs.map((f) => {
-    // Dipole transfer: |H(f)| = |sin(pi * f * D_eff / c)| / (pi * f * D_eff / c)
-    // Simplified first-order approximation:
-    // Below f_peak: -6 dB/oct roll-off (like a 1st-order high-pass)
-    // At f_peak: 0 dB (flat transition)
-    // Above f_peak: 0 dB (full dipole radiation)
-    const ratio = f / fPeak;
-    if (ratio < 1) {
-      // -6 dB/oct below peak: -20*log10(1/ratio) = 20*log10(ratio)
-      return { freq: f, magnitude: 20 * Math.log10(ratio + 1e-30) };
-    }
-    return { freq: f, magnitude: 0 };
-  });
+  return { freqs, spl, splMonopole, excursionMm, impedance, dipolePeakHz, dEff };
 }
 
-/**
- * Calculate the full open-baffle system response.
- * Combines driver response + dipole roll-off + baffle step.
- *
- * @param driverResponse  Driver on-axis frequency response
- * @param baffleWidth     Baffle width [mm]
- * @param baffleHeight    Baffle height [mm]
- * @param freqs           Frequency array [Hz]
- * @returns Combined open-baffle response
- */
-export function calcOpenBaffleResponse(
-  driverResponse: FrequencyDataPoint[],
-  baffleWidth: number,
-  baffleHeight: number,
-  freqs: number[],
-): FrequencyDataPoint[] {
-  const dipole = calcDipoleResponse(baffleWidth, baffleHeight, freqs);
-
-  // For open baffle, baffle step is different: the front radiation
-  // still transitions from 4π to 2π, but the dipole cancellation
-  // dominates at low frequencies.
-
-  return freqs.map((f, i) => ({
-    freq: f,
-    magnitude: (driverResponse[i]?.magnitude ?? 0) + dipole[i]!.magnitude,
-  }));
-}
+export const OPEN_BAFFLE_NOTE =
+  'Excursion-krav for åben baffel er langt større end lukket kasse (SPEC §4.8) — tjek excursion-kurven ved ønsket lydtryk.';
+export { RHO0 };

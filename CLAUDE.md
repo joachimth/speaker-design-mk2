@@ -4,7 +4,7 @@ Guidance for AI assistants working in this repository.
 
 ## What this repository is
 
-A **web-based speaker design tool** that runs entirely in the browser. Users
+**Speaker Design 4 All (mk2)** — a web-based speaker design tool that runs entirely in the browser. Users
 upload driver datasheets (PDF), the tool extracts Thiele-Small parameters and
 frequency response data, suggests cabinet designs, and simulates the complete
 acoustic system including crossovers, directivity, and spinorama.
@@ -40,9 +40,11 @@ static files) as an alternative.
 │   ├── store/                 # Zustand state stores
 │   ├── db/                    # Dexie IndexedDB setup
 │   ├── data/                  # Seed driver database (seedDrivers.ts)
+│   ├── engine/                # Headless physics engine (complex.ts, frequencyAxis, enclosure models) — no UI imports allowed
 │   ├── lib/
 │   │   ├── pdf/               # PDF extraction + T/S parsing + graph digitizer
-│   │   └── acoustic/          # All acoustic simulation math (ported from mk2 Python)
+│   │   ├── export/            # buildSheet, camillaDSP, biquad, REW exports
+│   │   └── acoustic/          # Acoustic simulation math (mk1 heritage, migrating to engine/)
 │   ├── components/            # React components (by domain)
 │   └── pages/                 # Top-level views
 ├── public/                    # Static assets (favicon)
