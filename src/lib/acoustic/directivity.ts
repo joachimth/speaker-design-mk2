@@ -14,6 +14,7 @@ import type {
   SystemResponseResult,
   PolarResult,
 } from '@/types';
+import { calcBaffleDiffractionOffAxis } from './baffle';
 
 const C = 343000; // speed of sound [mm/s]
 
@@ -249,6 +250,85 @@ function effectiveBaffleDiameter(
   return driverDiameter + (baffleDia - driverDiameter) * weight * 0.5;
 }
 
+// ---------------------------------------------------------------------------
+// Per-angle edge-diffraction deltas
+// ---------------------------------------------------------------------------
+
+const deltaCache = new Map<string, number[]>();
+
+/**
+ * Diffraction delta [dB] at observation angle (h, v) relative to on-axis,
+ * for a driver at (xMm, yMm) on the baffle: Δ(f) = D(f, h, v) − D(f, 0, 0).
+ *
+ * Adding Δ to a band curve that already carries the baked-in on-axis
+ * diffraction replaces it with the angle's own diffraction — no double
+ * counting. Δ → 0 at DC (both limits are −6 dB into 4π) and at (0, 0).
+ *
+ * The edge integral is evaluated on a coarse log-grid (≤ 72 points) and
+ * linearly interpolated to the caller's grid: the delta is smooth vs
+ * log-f, and this keeps first-call cost ~1 s for a full CEA-2034 angle
+ * set with caching making every later call free. For sources on the
+ * vertical centerline (the shared baffle layout always centers drivers),
+ * the horizontal mirror symmetry Δ(−h, v) = Δ(h, v) halves the work.
+ */
+function diffractionDeltaDb(
+  baffleWidth: number,
+  baffleHeight: number,
+  xMm: number,
+  yMm: number,
+  roundoverRadius: number,
+  freqs: number[],
+  hAngleDeg: number,
+  vAngleDeg: number,
+): number[] {
+  const centered = Math.abs(xMm - baffleWidth / 2) < 0.75;
+  const hEval = centered ? Math.abs(hAngleDeg) : hAngleDeg;
+  const key = `${baffleWidth}x${baffleHeight}@${xMm.toFixed(1)},${yMm.toFixed(1)}r${roundoverRadius}` +
+    `n${freqs.length}f${freqs[0]?.toFixed(2)}-${freqs[freqs.length - 1]?.toFixed(2)}|${hEval},${vAngleDeg}`;
+  const hit = deltaCache.get(key);
+  if (hit) return hit;
+
+  const MAX_PTS = 72;
+  const stride = Math.max(1, Math.ceil(freqs.length / MAX_PTS));
+  const idx: number[] = [];
+  for (let i = 0; i < freqs.length; i += stride) idx.push(i);
+  if (idx[idx.length - 1] !== freqs.length - 1) idx.push(freqs.length - 1);
+  const coarseFreqs = idx.map((i) => freqs[i]!);
+
+  const off = calcBaffleDiffractionOffAxis(
+    baffleWidth, baffleHeight, xMm, yMm, roundoverRadius, coarseFreqs, hEval, vAngleDeg,
+  );
+  const on = calcBaffleDiffractionOffAxis(
+    baffleWidth, baffleHeight, xMm, yMm, roundoverRadius, coarseFreqs, 0, 0,
+  );
+  const coarseDelta = off.map((d, i) => d - on[i]!);
+
+  // Linear interpolation in index space (all caller grids are log-spaced)
+  const delta = new Array<number>(freqs.length).fill(0);
+  for (let s = 0; s < idx.length - 1; s++) {
+    const i0 = idx[s]!;
+    const i1 = idx[s + 1]!;
+    const d0 = coarseDelta[s]!;
+    const d1 = coarseDelta[s + 1]!;
+    for (let i = i0; i <= i1; i++) {
+      const t = i1 === i0 ? 0 : (i - i0) / (i1 - i0);
+      delta[i] = d0 + (d1 - d0) * t;
+    }
+  }
+
+  if (deltaCache.size > 2048) deltaCache.clear();
+  deltaCache.set(key, delta);
+  return delta;
+}
+
+/** Per-band input for calcSpinoramaMultiDriver. */
+export interface SpinoramaBandInput {
+  curve: number[];
+  diameter: number;
+  /** Driver position on the baffle [mm]; enables per-angle edge diffraction. */
+  position?: { xMm: number; yMm: number } | null;
+}
+
 /**
  * Calculate CEA-2034 spinorama with per-band directivity.
  *
@@ -258,20 +338,28 @@ function effectiveBaffleDiameter(
  * correctly models that a tweeter (25mm) has much wider directivity at
  * 10kHz than a woofer (130mm).
  *
- * Also includes baffle diffraction: at low frequencies the driver appears
- * as a larger source (baffle-sized), widening the directivity pattern.
+ * Baffle handling, two paths:
+ * - Bands WITH a position: the band curve already carries the on-axis
+ *   edge diffraction (baked in by simulateOnAxisWithBands), so each angle
+ *   applies plain piston directivity + the per-angle diffraction delta
+ *   Δ(f, h, v). Placement and roundover then shape LW/ER/SP/DI/PIR.
+ * - Bands WITHOUT a position (legacy callers): effective baffle diameter
+ *   approximation, identical to the previous behavior.
  *
- * @param bandCurves  Array of { curve, diameter } for each active band
+ * @param bandCurves  Array of { curve, diameter, position? } per active band
  * @param freqs       Frequency array
  * @param baffleWidth  Baffle width [mm]
  * @param baffleHeight Baffle height [mm]
+ * @param onAxisComplex Complex-summed on-axis curve (correct XO phase)
+ * @param opts         { roundoverRadius } for the diffraction delta
  */
 export function calcSpinoramaMultiDriver(
-  bandCurves: { curve: number[]; diameter: number }[],
+  bandCurves: SpinoramaBandInput[],
   freqs: number[],
   baffleWidth: number,
   baffleHeight: number,
   onAxisComplex?: number[],
+  opts?: { roundoverRadius?: number },
 ): SystemResponseResult {
   // CEA-2034 standard angles
   const lwAngles = [
@@ -301,15 +389,49 @@ export function calcSpinoramaMultiDriver(
   let totalWeight = 0;
   spAngles.forEach((a) => (totalWeight += a.w));
 
+  // Precompute per-band diffraction deltas for every unique angle pair.
+  // Cache-backed: only the first call per (baffle, position, roundover,
+  // grid) pays for the edge integrals.
+  const roundoverRadius = opts?.roundoverRadius ?? 0;
+  const angleSet = new Map<string, { h: number; v: number }>();
+  const addAngle = (h: number, v: number) => {
+    const k = `${h}|${v}`;
+    if (!angleSet.has(k)) angleSet.set(k, { h, v });
+  };
+  lwAngles.forEach((a) => addAngle(a.h, a.v));
+  erAngles.forEach((a) => addAngle(a.h, a.v));
+  spAngles.forEach((a) => addAngle(a.h, a.v));
+
+  const bandDeltas = new Map<string, (number[] | null)[]>();
+  if (bandCurves.some((bc) => bc.position)) {
+    for (const [k, a] of angleSet) {
+      bandDeltas.set(k, bandCurves.map((bc) => {
+        if (!bc.position || (a.h === 0 && a.v === 0)) return null;
+        return diffractionDeltaDb(
+          baffleWidth, baffleHeight, bc.position.xMm, bc.position.yMm,
+          roundoverRadius, freqs, a.h, a.v,
+        );
+      }));
+    }
+  }
+
   // Helper: compute off-axis response at frequency index fi for angle (h, v)
   function offAxisAtAngle(fi: number, h: number, v: number): number {
+    const deltas = bandDeltas.get(`${h}|${v}`);
     let sumLinear = 0;
-    for (const bc of bandCurves) {
+    for (let bi = 0; bi < bandCurves.length; bi++) {
+      const bc = bandCurves[bi]!;
       const db = bc.curve[fi] ?? -100;
-      const effDia = effectiveBaffleDiameter(freqs[fi]!, bc.diameter, baffleWidth, baffleHeight);
+      // Position-aware band: plain piston directivity + per-angle edge-
+      // diffraction delta (replaces the baked-in on-axis diffraction at
+      // this angle). Legacy band: effective-baffle-diameter approximation.
+      const effDia = bc.position
+        ? bc.diameter
+        : effectiveBaffleDiameter(freqs[fi]!, bc.diameter, baffleWidth, baffleHeight);
       const hDir = pistonDirectivity(freqs[fi]!, h, effDia);
       const vDir = pistonDirectivity(freqs[fi]!, v, effDia);
-      const dbAtAngle = db + 20 * Math.log10(Math.max(hDir * vDir, 1e-6));
+      const deltaDb = deltas?.[bi]?.[fi] ?? 0;
+      const dbAtAngle = db + 20 * Math.log10(Math.max(hDir * vDir, 1e-6)) + deltaDb;
       sumLinear += Math.pow(10, dbAtAngle / 20);
     }
     return 20 * Math.log10(Math.max(sumLinear, 1e-10));

@@ -234,6 +234,9 @@ export function complexSum(
 export interface BandCurveData {
   curve: number[];
   diameter: number;
+  /** Estimated driver position on the baffle (same layout as CAD export);
+   *  enables per-angle edge diffraction in the spinorama. */
+  position?: { xMm: number; yMm: number } | null;
 }
 
 export function simulateOnAxisWithBands(
@@ -261,6 +264,7 @@ export function simulateOnAxisWithBands(
   const positions = layoutBandPositions(bands, drivers, baffleWidth, baffleHeight);
 
   const processedBands: ProcessedBand[] = [];
+  const bandPositions: ({ xMm: number; yMm: number } | null)[] = [];
 
   for (let bi = 0; bi < bands.length; bi++) {
     const band = bands[bi]!;
@@ -285,15 +289,17 @@ export function simulateOnAxisWithBands(
       hasRealResponse: result.hasRealResponse,
       filters: result.filters,
     });
+    bandPositions.push(pos ? { xMm: pos.xMm, yMm: pos.yMm } : null);
   }
 
   const summed = complexSum(processedBands, freqs);
 
-  const bandCurves: BandCurveData[] = processedBands.map((pb) => {
+  const bandCurves: BandCurveData[] = processedBands.map((pb, i) => {
     const driver = drivers.find((d) => d.id === pb.band.driverId) ?? drivers[0]!;
     return {
       curve: pb.curve.map((p) => p.magnitude),
       diameter: pistonDiameter(driver),
+      position: bandPositions[i] ?? null,
     };
   });
 

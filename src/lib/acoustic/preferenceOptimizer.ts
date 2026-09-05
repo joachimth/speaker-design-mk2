@@ -87,6 +87,7 @@ export function scoreFromBands(
   const spinorama = calcSpinoramaMultiDriver(
     bandCurves, freqs, baffleWidth, baffleHeight,
     summed.map((p) => p.magnitude),
+    { roundoverRadius },
   );
   return computePreferenceScore(spinorama);
 }

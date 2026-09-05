@@ -184,38 +184,7 @@ export function calcBaffleDiffraction(
   const cached = diffractionCache.get(key);
   if (cached) return cached;
 
-  // Clamp the source strictly inside the baffle
-  const x0 = Math.min(Math.max(driverXMm, 1), baffleWidth - 1);
-  const y0 = Math.min(Math.max(driverYMm, 1), baffleHeight - 1);
-
-  // Segment length: phase step < π/2 at 20 kHz → Δs < c/(4·20000) ≈ 4.3 mm
-  const SEG = 4;
-  const corners = [
-    [0, 0], [baffleWidth, 0], [baffleWidth, baffleHeight], [0, baffleHeight],
-  ] as const;
-
-  // Discretize the perimeter; per segment: subtended angle Δθ and distance r
-  const segs: { dTheta: number; rMm: number }[] = [];
-  for (let e = 0; e < 4; e++) {
-    const [ax, ay] = corners[e]!;
-    const [bx, by] = corners[(e + 1) % 4]!;
-    const len = Math.hypot(bx - ax, by - ay);
-    const n = Math.max(8, Math.ceil(len / SEG));
-    let prevTheta = Math.atan2(ay - y0, ax - x0);
-    for (let i = 1; i <= n; i++) {
-      const t = i / n;
-      const px = ax + (bx - ax) * t;
-      const py = ay + (by - ay) * t;
-      const theta = Math.atan2(py - y0, px - x0);
-      let d = theta - prevTheta;
-      while (d > Math.PI) d -= 2 * Math.PI;
-      while (d < -Math.PI) d += 2 * Math.PI;
-      const mx = ax + (bx - ax) * (t - 0.5 / n);
-      const my = ay + (by - ay) * (t - 0.5 / n);
-      segs.push({ dTheta: Math.abs(d), rMm: Math.hypot(mx - x0, my - y0) });
-      prevTheta = theta;
-    }
-  }
+  const segs = perimeterSegments(baffleWidth, baffleHeight, driverXMm, driverYMm);
 
   const fR = roundoverRadius > 0 ? C / (4 * roundoverRadius) : Infinity;
   const result = frequencies.map((f) => {
@@ -235,4 +204,119 @@ export function calcBaffleDiffraction(
   if (diffractionCache.size > 64) diffractionCache.clear();
   diffractionCache.set(key, result);
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Off-axis edge diffraction
+// ---------------------------------------------------------------------------
+
+interface PerimeterSegment {
+  dTheta: number; // subtended angle at the source [rad]
+  rMm: number;    // source → segment midpoint distance [mm]
+  dxMm: number;   // segment midpoint x offset from source [mm]
+  dyMm: number;   // segment midpoint y offset from source [mm]
+}
+
+/**
+ * Discretize the baffle perimeter into segments as seen from a source at
+ * (driverXMm, driverYMm). Shared between the on-axis and off-axis edge
+ * diffraction integrals. Segment length keeps the phase step < π/2 at
+ * 20 kHz (Δs < c/(4·20000) ≈ 4.3 mm).
+ */
+function perimeterSegments(
+  baffleWidth: number,
+  baffleHeight: number,
+  driverXMm: number,
+  driverYMm: number,
+): PerimeterSegment[] {
+  // Clamp the source strictly inside the baffle
+  const x0 = Math.min(Math.max(driverXMm, 1), baffleWidth - 1);
+  const y0 = Math.min(Math.max(driverYMm, 1), baffleHeight - 1);
+
+  const SEG = 4;
+  const corners = [
+    [0, 0], [baffleWidth, 0], [baffleWidth, baffleHeight], [0, baffleHeight],
+  ] as const;
+
+  const segs: PerimeterSegment[] = [];
+  for (let e = 0; e < 4; e++) {
+    const [ax, ay] = corners[e]!;
+    const [bx, by] = corners[(e + 1) % 4]!;
+    const len = Math.hypot(bx - ax, by - ay);
+    const n = Math.max(8, Math.ceil(len / SEG));
+    let prevTheta = Math.atan2(ay - y0, ax - x0);
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      const px = ax + (bx - ax) * t;
+      const py = ay + (by - ay) * t;
+      const theta = Math.atan2(py - y0, px - x0);
+      let d = theta - prevTheta;
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      const mx = ax + (bx - ax) * (t - 0.5 / n);
+      const my = ay + (by - ay) * (t - 0.5 / n);
+      segs.push({
+        dTheta: Math.abs(d),
+        rMm: Math.hypot(mx - x0, my - y0),
+        dxMm: mx - x0,
+        dyMm: my - y0,
+      });
+      prevTheta = theta;
+    }
+  }
+  return segs;
+}
+
+/**
+ * Edge-diffraction response observed off-axis, same Vanderkooy-style
+ * integral as calcBaffleDiffraction but with a far-field observation
+ * direction.
+ *
+ * For an observer at horizontal angle h and vertical angle v (degrees,
+ * 0/0 = on-axis), the diffracted contribution from an edge segment at
+ * in-baffle offset (dx, dy) from the source travels the extra path
+ * r − (dx·ux + dy·uy) relative to the direct sound, where
+ * (ux, uy) = (sin h · cos v, sin v) is the observation direction
+ * projected onto the baffle plane. At (0, 0) this reduces exactly to the
+ * on-axis integral (delegated so the cached array identity is shared).
+ *
+ * Model limits (documented, deliberate): far-field, front hemisphere
+ * only, no cabinet-depth/back-wall shadowing, edge re-radiation amplitude
+ * kept angle-independent. Uncached — callers cache per-angle deltas.
+ */
+export function calcBaffleDiffractionOffAxis(
+  baffleWidth: number,
+  baffleHeight: number,
+  driverXMm: number,
+  driverYMm: number,
+  roundoverRadius: number,
+  frequencies: number[],
+  hAngleDeg: number,
+  vAngleDeg: number,
+): number[] {
+  if (hAngleDeg === 0 && vAngleDeg === 0) {
+    return calcBaffleDiffraction(baffleWidth, baffleHeight, driverXMm, driverYMm, roundoverRadius, frequencies);
+  }
+
+  const segs = perimeterSegments(baffleWidth, baffleHeight, driverXMm, driverYMm);
+
+  const hRad = (hAngleDeg * Math.PI) / 180;
+  const vRad = (vAngleDeg * Math.PI) / 180;
+  const ux = Math.sin(hRad) * Math.cos(vRad);
+  const uy = Math.sin(vRad);
+
+  const fR = roundoverRadius > 0 ? C / (4 * roundoverRadius) : Infinity;
+  return frequencies.map((f) => {
+    const g = roundoverRadius > 0 ? 1 / (1 + (f / fR) ** 2) : 1;
+    let re = 1;
+    let im = 0;
+    const k = (2 * Math.PI * f) / C; // rad per mm
+    for (const s of segs) {
+      const amp = (s.dTheta / (2 * Math.PI)) * 0.5 * g;
+      const phase = -k * (s.rMm - (s.dxMm * ux + s.dyMm * uy));
+      re -= amp * Math.cos(phase);
+      im -= amp * Math.sin(phase);
+    }
+    return 20 * Math.log10(Math.max(Math.hypot(re, im), 1e-6));
+  });
 }

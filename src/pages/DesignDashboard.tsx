@@ -47,7 +47,7 @@ import {
   PANEL_MATERIALS,
   type PanelMaterialKey,
 } from '@/lib/acoustic/panelResonance'
-import type { CabinetType, DesignState, DesignVersion, Driver } from '@/types'
+import type { CabinetType, DesignState, DesignVersion } from '@/types'
 
 const STATUS_STYLE: Record<string, { dot: string; box: string }> = {
   ready: {
@@ -86,12 +86,6 @@ type UndoState = {
   portSnapshot?: { fb: number | null; vb: number | null; diameter: number; numPorts: number }
   designSnapshot?: Partial<DesignState>
 } | null
-
-function pistonDiameterOf(driver: Driver | undefined): number {
-  const sd = driver?.tsParams?.sd
-  if (sd && sd > 0) return 2 * Math.sqrt(sd / Math.PI) * 10 // cm² → mm
-  return driver?.dimensions?.overallDiameter ? driver.dimensions.overallDiameter * 0.8 : 100
-}
 
 function logFreqs(f0: number, f1: number, n: number): number[] {
   const out: number[] = []
@@ -152,19 +146,20 @@ export default function DesignDashboard() {
   // Spinorama (computed lazily when the tab is open)
   const spin = useMemo(() => {
     if (tab !== 'spinorama' || !simResult) return null
-    const pbs = simResult.processedBands.filter((pb) => pb.curve.length > 0)
-    if (pbs.length === 0) return null
+    // simResult.bandCurves carry diameter + estimated baffle position, so the
+    // spinorama uses the same per-angle edge-diffraction model as the optimizer
+    if (simResult.bandCurves.length === 0) return null
     const freqs = summed!.map((p) => p.freq)
-    const bandCurves = pbs.map((pb) => ({
-      curve: pb.curve.map((p) => p.magnitude),
-      diameter: pistonDiameterOf(drivers.find((d) => d.id === pb.driverId)),
-    }))
     try {
-      return calcSpinoramaMultiDriver(bandCurves, freqs, design.baffleWidth, design.baffleHeight, summed!.map((p) => p.magnitude))
+      return calcSpinoramaMultiDriver(
+        simResult.bandCurves, freqs, design.baffleWidth, design.baffleHeight,
+        summed!.map((p) => p.magnitude),
+        { roundoverRadius: design.roundoverRadius },
+      )
     } catch {
       return null
     }
-  }, [tab, simResult, summed, drivers, design.baffleWidth, design.baffleHeight])
+  }, [tab, simResult, summed, design.baffleWidth, design.baffleHeight, design.roundoverRadius])
 
   // Impedance (bass driver in the active cabinet)
   const impedance = useMemo(() => {

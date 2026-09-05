@@ -32,6 +32,8 @@ export interface SimWorkerOutput {
     driverId: string
     curve: FrequencyDataPoint[]
     hasRealResponse: boolean
+    /** Estimated baffle position (CAD layout); null when the stack doesn't fit */
+    position: { xMm: number; yMm: number } | null
   }[]
   summedResponse: FrequencyDataPoint[]
   freqs: number[]
@@ -55,6 +57,7 @@ self.onmessage = (e: MessageEvent<SimWorkerInput>) => {
   const positions = layoutBandPositions(activeBands, drivers, baffleWidth, baffleHeight)
 
   const processedBands: ProcessedBand[] = []
+  const bandPositions: ({ xMm: number; yMm: number } | null)[] = []
 
   for (let bi = 0; bi < activeBands.length; bi++) {
     const band = activeBands[bi]!
@@ -79,17 +82,19 @@ self.onmessage = (e: MessageEvent<SimWorkerInput>) => {
       hasRealResponse: result.hasRealResponse,
       filters: result.filters,
     })
+    bandPositions.push(pos ? { xMm: pos.xMm, yMm: pos.yMm } : null)
   }
 
   // Complex voltage summation (shared implementation)
   const summedResponse = complexSum(processedBands, freqs)
 
   const output: SimWorkerOutput = {
-    processedBands: processedBands.map((pb) => ({
+    processedBands: processedBands.map((pb, i) => ({
       band: pb.band,
       driverId: pb.driverId,
       curve: pb.curve,
       hasRealResponse: pb.hasRealResponse,
+      position: bandPositions[i] ?? null,
     })),
     summedResponse,
     freqs,

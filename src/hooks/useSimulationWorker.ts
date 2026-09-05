@@ -30,6 +30,7 @@ export interface ProcessedBand {
   driverId: string
   curve: FrequencyDataPoint[]
   hasRealResponse: boolean
+  position?: { xMm: number; yMm: number } | null
 }
 
 interface SimResult {

@@ -734,6 +734,7 @@ export default function SystemSimulation() {
       driver: driverMap.get(wb.driverId),
       curve: wb.curve,
       hasRealResponse: wb.hasRealResponse,
+      position: wb.position ?? null,
     }))
   }, [workerBands, driverMap])
 
@@ -790,12 +791,14 @@ export default function SystemSimulation() {
     const bandCurves = activeBands.map((pb) => ({
       curve: pb.curve.map((p) => p.magnitude),
       diameter: pistonDiameterOf(pb.driver),
+      position: pb.position ?? null,
     }))
     return calcSpinoramaMultiDriver(
       bandCurves, freqs, baffleWidth, baffleHeight,
       summedResponse.map((p) => p.magnitude),
+      { roundoverRadius },
     )
-  }, [summedResponse, processedBands, baffleWidth, baffleHeight])
+  }, [summedResponse, processedBands, baffleWidth, baffleHeight, roundoverRadius])
 
   const spinRef = useMemo(() => {
     if (!systemSpinorama || systemSpinorama.onAxis.length === 0) return 0
