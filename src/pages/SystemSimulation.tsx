@@ -4,7 +4,7 @@ import { useProjectStore, downloadJSON } from '@/store/projectStore'
 import { useDesignStore } from '@/store/designStore'
 import { Card, Select, NumberInput, Badge, StatCard, Button } from '@/components/common/UI'
 import { crossoverSlopeDbPerOctave } from '@/lib/acoustic/crossover'
-import { calcBaffleStep, baffleStepFrequency } from '@/lib/acoustic/baffle'
+import { calcBaffleStep, calcBaffleDiffraction, baffleStepFrequency } from '@/lib/acoustic/baffle'
 import { calcSpinoramaMultiDriver, pistonDirectivity } from '@/lib/acoustic/directivity'
 import { generateFrequencies } from '@/lib/acoustic/thieleSmall'
 import { suggestCrossover, suggestBaffle, optimizeGainsForRoom, acousticCenterDepth, type RoomOptimizationResult } from '@/lib/acoustic/autoDesign'
@@ -1657,23 +1657,43 @@ export default function SystemSimulation() {
         </Card>
       )}
 
-      {/* Baffle step */}
-      <Card title="Baffelstep">
-        <div className="space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <StatCard label="Baffelstep frekvens" value={fStep.toFixed(0)} unit="Hz" />
-            <StatCard label="Baffel dimension" value={`${baffleWidth}x${baffleHeight}`} unit="mm" />
-            <StatCard label="Tab ved lav freq" value="-6" unit="dB" />
-          </div>
-          <ResponsivePlot
-            data={[
-              { x: baffleStepCurve.freq, y: baffleStepCurve.response, name: 'Baffelstep tab', color: '#f97316' },
-            ]}
-            yRange={[-8, 2]}
-            yLabel="dB"
-          />
-        </div>
-      </Card>
+      {/* Baffle step / edge diffraction */}
+      {(() => {
+        const palette = ['#3b82f6', '#10b981', '#8b5cf6', '#ef4444']
+        const diffSeries = processedBands
+          .map((pb, i) => ({ pb, i }))
+          .filter(({ pb }) => pb.driver && pb.position)
+          .map(({ pb, i }) => ({
+            x: freqs,
+            y: calcBaffleDiffraction(baffleWidth, baffleHeight, pb.position!.xMm, pb.position!.yMm, roundoverRadius, freqs),
+            name: `Vej ${i + 1} kantmodel (y=${pb.position!.yMm.toFixed(0)}mm)`,
+            color: palette[i % palette.length]!,
+          }))
+        return (
+          <Card title="Baffelstep & kantdiffraktion">
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <StatCard label="Baffelstep frekvens" value={fStep.toFixed(0)} unit="Hz" />
+                <StatCard label="Baffel dimension" value={`${baffleWidth}x${baffleHeight}`} unit="mm" />
+                <StatCard label="Tab ved lav freq" value="-6" unit="dB" />
+              </div>
+              <ResponsivePlot
+                data={[
+                  ...diffSeries,
+                  { x: baffleStepCurve.freq, y: baffleStepCurve.response, name: 'Analytisk 6 dB-step (reference)', color: '#f97316', dash: true },
+                ]}
+                yRange={[-8, 4]}
+                yLabel="dB"
+              />
+              <p className="text-xs text-gray-500">
+                {diffSeries.length > 0
+                  ? 'Kantmodellen (fuldt optrukket) er den kurve simuleringen faktisk bruger: edge-integral med driverplacering på baflen og roundover — ripple over steppet afhænger af afstanden til kanterne. Det glatte 6 dB-step (stiplet) er kun analytisk reference.'
+                  : 'Driver-stakken kan ikke ligge på baflen (for lille), så simuleringen falder tilbage til det analytiske 6 dB-step uden placerings-ripple.'}
+              </p>
+            </div>
+          </Card>
+        )
+      })()}
 
       {/* Cabinet loading response */}
       {(() => {
