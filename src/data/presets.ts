@@ -66,7 +66,8 @@ const KUDOS_X2_DESIGN: DesignState = {
       highpassType: 'LR4',
       gain: -6,
       polarity: 0,
-      delay: 0,
+      // Auto time-align vs Wavecor mid (21.0 − 6.3 mm)/343 — side bass excluded
+      delay: 0.04,
       mount: { placement: 'front', yMm: 655 },
     },
   ],
@@ -152,7 +153,8 @@ const MK3_REFERENCE_DESIGN: DesignState = {
       highpassType: 'LR4',
       gain: -9,
       polarity: 0,
-      delay: 0,
+      // Auto time-align vs 18W mid (25.2 − 5.25 mm)/343 — side bass excluded
+      delay: 0.06,
       mount: { placement: 'front', yMm: 901 },
     },
   ],

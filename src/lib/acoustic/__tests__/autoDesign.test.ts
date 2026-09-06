@@ -8,6 +8,8 @@ import {
   pistonDiameter,
   directivityLimit,
   acousticCenterDepth,
+  effectiveAcousticDepth,
+  computeAutoDelays,
   usableRange,
 } from '../autoDesign';
 import type { Driver, ThieleSmallParams, FrequencyDataPoint } from '@/types';
@@ -71,6 +73,65 @@ describe('directivityLimit', () => {
 
   it('gives ~1.3 kHz for 170mm piston', () => {
     expect(directivityLimit(170)).toBeCloseTo(1284, -1);
+  });
+});
+
+describe('effectiveAcousticDepth + computeAutoDelays (mount-aware)', () => {
+  const woofer = makeDriver({ id: 'w', type: 'woofer' });   // default 55 mm
+  const mid = makeDriver({ id: 'm', type: 'midrange' });    // default 30 mm
+  const tweeter = makeDriver({ id: 't', type: 'tweeter' }); // default 10 mm
+  const drivers = [woofer, mid, tweeter];
+
+  it('side-mounted returns null (excluded from the front-baffle depth model)', () => {
+    expect(effectiveAcousticDepth(woofer, { placement: 'side' })).toBeNull();
+    expect(effectiveAcousticDepth(woofer)).toBeCloseTo(acousticCenterDepth(woofer));
+  });
+
+  it('zMm plane offset shifts effective depth (stepped baffle, both directions)', () => {
+    const base = effectiveAcousticDepth(tweeter)!;
+    expect(effectiveAcousticDepth(tweeter, { placement: 'front', zMm: 20 })).toBeCloseTo(base + 20);
+    expect(effectiveAcousticDepth(tweeter, { placement: 'front', zMm: -5 })).toBeCloseTo(base - 5);
+  });
+
+  it('deepest front band gets 0 delay, shallower bands positive delay', () => {
+    const delays = computeAutoDelays(
+      [{ driverId: 'w' }, { driverId: 'm' }, { driverId: 't' }], drivers);
+    expect(delays[0]).toBe(0);
+    expect(delays[1]!).toBeGreaterThan(0);
+    expect(delays[2]!).toBeGreaterThan(delays[1]!);
+    expect(delays[2]!).toBeCloseTo((55 - 10) / 343, 2);
+  });
+
+  it('side-mounted band is excluded: null delay, reference = deepest FRONT band', () => {
+    const delays = computeAutoDelays([
+      { driverId: 'w', mount: { placement: 'side' as const } },
+      { driverId: 'm' },
+      { driverId: 't' },
+    ], drivers);
+    expect(delays[0]).toBeNull();
+    expect(delays[1]).toBe(0);
+    expect(delays[2]!).toBeCloseTo((30 - 10) / 343, 2);
+  });
+
+  it('mechanical zMm alignment removes the need for electrical delay', () => {
+    const delays = computeAutoDelays([
+      { driverId: 'm' },
+      { driverId: 't', mount: { placement: 'front' as const, zMm: 20 } }, // 10+20 = 30 = mid
+    ], drivers);
+    expect(delays[0]).toBe(0);
+    expect(delays[1]).toBe(0);
+  });
+
+  it('no front bands → all null (nothing to align against)', () => {
+    const delays = computeAutoDelays(
+      [{ driverId: 'w', mount: { placement: 'side' as const } }], drivers);
+    expect(delays[0]).toBeNull();
+  });
+
+  it('unknown driver → null (left untouched)', () => {
+    const delays = computeAutoDelays([{ driverId: 'nope' }, { driverId: 'm' }], drivers);
+    expect(delays[0]).toBeNull();
+    expect(delays[1]).toBe(0);
   });
 });
 

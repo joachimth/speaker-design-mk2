@@ -30,7 +30,7 @@ import {
 import { calcCabinetResponse } from './cabinetResponse';
 import { calcBaffleStep, calcBaffleStepCompensation, calcBaffleDiffraction } from './baffle';
 import { layoutBandPositions } from './baffleLayout';
-import { pistonDiameter, acousticCenterDepth } from './autoDesign';
+import { pistonDiameter, acousticCenterDepth, effectiveAcousticDepth } from './autoDesign';
 
 export const SHARED_SAMPLE_RATE = 48000;
 
@@ -46,6 +46,15 @@ export interface ProcessedBand {
   curve: FrequencyDataPoint[];
   hasRealResponse: boolean;
   filters: BandFilters;
+  /**
+   * Mechanical acoustic-center depth behind the main baffle plane [mm]
+   * (driver estimate + mount.zMm plane offset). Enters the complex sum as
+   * arrival-time phase, so time alignment (electrical delay OR a stepped
+   * baffle) is audible in the simulated response. Side-mounted bands use 0:
+   * their low-passed output makes cm-scale alignment uncritical, and the
+   * front-baffle depth model does not apply to them.
+   */
+  depthMm?: number;
 }
 
 /**
@@ -221,6 +230,12 @@ export function complexSum(
       }
       if (pb.band.polarity === 180) phase += Math.PI;
       if (pb.band.delay > 0) phase += -2 * Math.PI * f * pb.band.delay * 0.001;
+      // Mechanical arrival-time phase: an acoustic center depthMm behind the
+      // baffle plane arrives depthMm/c later. Same sign as electrical delay —
+      // auto time-align (or a stepped baffle via mount.zMm) cancels the
+      // DIFFERENCES between bands and restores a coherent sum.
+      // (negative depth = mechanically moved FORWARD of the main plane → arrives earlier)
+      if (pb.depthMm) phase += -2 * Math.PI * f * (pb.depthMm / 343000);
 
       sumReal += mag * Math.cos(phase);
       sumImag += mag * Math.sin(phase);
@@ -241,6 +256,10 @@ export interface BandCurveData {
   /** Estimated driver position on the baffle (same layout as CAD export);
    *  enables per-angle edge diffraction in the spinorama. */
   position?: { xMm: number; yMm: number } | null;
+  /** Own sub-baffle dims [mm] (split front baffle): the spinorama delta for
+   *  this band is computed on its own panel instead of the main baffle. */
+  baffleWMm?: number;
+  baffleHMm?: number;
 }
 
 export function simulateOnAxisWithBands(
@@ -268,15 +287,25 @@ export function simulateOnAxisWithBands(
   const positions = layoutBandPositions(bands, drivers, baffleWidth, baffleHeight);
 
   const processedBands: ProcessedBand[] = [];
-  const bandPositions: ({ xMm: number; yMm: number } | null)[] = [];
+  const bandPositions: ({ xMm: number; yMm: number; baffleWMm?: number; baffleHMm?: number } | null)[] = [];
 
   for (let bi = 0; bi < bands.length; bi++) {
     const band = bands[bi]!;
     const driver = drivers.find((d) => d.id === band.driverId);
+    // Own sub-baffle (split/stepped front baffle with its own edges): this
+    // band's edge diffraction is computed on its own panel with the driver
+    // centered on it. Otherwise: global baffle + shared layout position.
+    const own = band.mount?.placement !== 'side'
+      && band.mount?.baffleWMm && band.mount.baffleWMm > 0
+      && band.mount?.baffleHMm && band.mount.baffleHMm > 0
+      ? { w: band.mount.baffleWMm, h: band.mount.baffleHMm }
+      : null;
     const pos = positions?.find((p) => p.bandIndex === bi);
-    const diffractionDb = pos
-      ? calcBaffleDiffraction(baffleWidth, baffleHeight, pos.xMm, pos.yMm, roundoverRadius, freqs)
-      : undefined;
+    const diffractionDb = own
+      ? calcBaffleDiffraction(own.w, own.h, own.w / 2, own.h / 2, roundoverRadius, freqs)
+      : pos
+        ? calcBaffleDiffraction(baffleWidth, baffleHeight, pos.xMm, pos.yMm, roundoverRadius, freqs)
+        : undefined;
     const result = processBand(
       band, driver, freqs,
       baffleStepResult, baffleComp,
@@ -292,8 +321,13 @@ export function simulateOnAxisWithBands(
       curve: result.curve,
       hasRealResponse: result.hasRealResponse,
       filters: result.filters,
+      depthMm: (driver ? effectiveAcousticDepth(driver, band.mount) : null) ?? 0,
     });
-    bandPositions.push(pos ? { xMm: pos.xMm, yMm: pos.yMm } : null);
+    // Spinorama position: for own-panel bands the delta must be computed on
+    // that panel → centered position within it (matches the on-axis call).
+    bandPositions.push(own
+      ? { xMm: own.w / 2, yMm: own.h / 2, baffleWMm: own.w, baffleHMm: own.h }
+      : pos ? { xMm: pos.xMm, yMm: pos.yMm } : null);
   }
 
   const summed = complexSum(processedBands, freqs);
@@ -303,7 +337,9 @@ export function simulateOnAxisWithBands(
     return {
       curve: pb.curve.map((p) => p.magnitude),
       diameter: pistonDiameter(driver),
-      position: bandPositions[i] ?? null,
+      position: bandPositions[i] ? { xMm: bandPositions[i]!.xMm, yMm: bandPositions[i]!.yMm } : null,
+      baffleWMm: bandPositions[i]?.baffleWMm,
+      baffleHMm: bandPositions[i]?.baffleHMm,
     };
   });
 

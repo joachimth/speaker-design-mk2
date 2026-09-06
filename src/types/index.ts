@@ -234,6 +234,22 @@ export interface BandMount {
   xMm?: number;
   /** Explicit center Y [mm from bottom edge]. For side-mounted drivers this is informational (height on the side panel). */
   yMm?: number;
+  /**
+   * Mechanical plane offset along the listening axis [mm] for a stepped /
+   * split front baffle. Positive = the unit's baffle plane sits BEHIND the
+   * main baffle plane (recessed), so its acoustic center moves further back.
+   * Enters the acoustic-center phase model and the auto time-align; the step
+   * edge itself is not modeled (documented approximation). Front placement only.
+   */
+  zMm?: number;
+  /**
+   * Own sub-baffle dimensions [mm] (split front baffle with its own edges).
+   * When both are set, this band's edge diffraction (on-axis + off-axis
+   * spinorama delta) is computed on its own panel with the driver centered
+   * on it, instead of the main baffle. CAD keeps the global position.
+   */
+  baffleWMm?: number;
+  baffleHMm?: number;
 }
 
 export interface DesignBand {

@@ -327,6 +327,11 @@ export interface SpinoramaBandInput {
   diameter: number;
   /** Driver position on the baffle [mm]; enables per-angle edge diffraction. */
   position?: { xMm: number; yMm: number } | null;
+  /** Own sub-baffle dims [mm] (split front baffle): when set, this band's
+   *  per-angle diffraction delta uses these dims (position is then within
+   *  that panel) instead of the global baffle. */
+  baffleWMm?: number;
+  baffleHMm?: number;
 }
 
 /**
@@ -407,8 +412,11 @@ export function calcSpinoramaMultiDriver(
     for (const [k, a] of angleSet) {
       bandDeltas.set(k, bandCurves.map((bc) => {
         if (!bc.position || (a.h === 0 && a.v === 0)) return null;
+        // Split front baffle: the band's own panel defines its edges.
+        const w = bc.baffleWMm && bc.baffleWMm > 0 ? bc.baffleWMm : baffleWidth;
+        const h = bc.baffleHMm && bc.baffleHMm > 0 ? bc.baffleHMm : baffleHeight;
         return diffractionDeltaDb(
-          baffleWidth, baffleHeight, bc.position.xMm, bc.position.yMm,
+          w, h, bc.position.xMm, bc.position.yMm,
           roundoverRadius, freqs, a.h, a.v,
         );
       }));

@@ -178,6 +178,29 @@ describe('shared simulateBands module', () => {
     expect(result[1]!.magnitude).toBeCloseTo(85, 0)
   })
 
+  it('complexSum: mechanical depth difference cancels; matching delay restores the sum', () => {
+    const testFreqs = [500, 5000]
+    const flatBand = (depthMm: number, delay = 0) => ({
+      band: { driverId: 'x', role: 'mid' as const, lowpassFreq: 0, lowpassType: 'LR4' as const, highpassFreq: 0, highpassType: 'LR4' as const, gain: 0, polarity: 0 as const, delay },
+      driverId: 'x',
+      curve: testFreqs.map((f) => ({ freq: f, magnitude: 80 })),
+      hasRealResponse: false,
+      filters: { lp: null, hp: null, eqs: [] },
+      depthMm,
+    })
+    // 34.3 mm depth difference = λ/2 at 5000 Hz → deep null; at 500 Hz nearly +6 dB
+    const misaligned = complexSum([flatBand(0), flatBand(34.3)], testFreqs)
+    expect(misaligned[1]!.magnitude).toBeLessThan(60)
+    expect(misaligned[0]!.magnitude).toBeGreaterThan(84)
+    // Electrical delay 0.1 ms (= 34.3 mm) on the shallow band restores +6 dB everywhere
+    const aligned = complexSum([flatBand(0, 0.1), flatBand(34.3)], testFreqs)
+    expect(aligned[0]!.magnitude).toBeCloseTo(86, 0)
+    expect(aligned[1]!.magnitude).toBeCloseTo(86, 0)
+    // Negative depth (unit mechanically moved FORWARD) also shifts phase
+    const forward = complexSum([flatBand(-17.15), flatBand(17.15)], testFreqs)
+    expect(forward[1]!.magnitude).toBeLessThan(60)
+  })
+
   it('complexSum returns very low values for empty bands', () => {
     const result = complexSum([], freqs)
     // No bands → sum is 0 → 20*log10(1e-10) = -200 dB
@@ -221,5 +244,43 @@ describe('shared simulateBands module', () => {
     expect(result.processedBands.length).toBe(2)
     // Summed response should have finite magnitudes
     expect(result.summed.every((p) => isFinite(p.magnitude))).toBe(true)
+    // Mechanical acoustic-center depth is attached per band (woofer deeper than tweeter)
+    expect(result.processedBands[0]!.depthMm!).toBeGreaterThan(result.processedBands[1]!.depthMm!)
+  })
+
+  it('own sub-baffle dims (split front baffle) change diffraction and flow to bandCurves', () => {
+    const woofer: Driver = {
+      id: 'test-woofer',
+      manufacturer: 'Test',
+      model: 'Woofer',
+      type: 'woofer',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      tsParams: {
+        fs: 30, qts: 0.4, vas: 50, re: 6, le: 1, bl: 10,
+        mms: 20, sd: 500, sensitivity: 88, xmax: 5, qes: 0.5, qms: 3, imp: 8,
+      },
+      dimensions: { overallDiameter: 180, cutoutDiameter: 160, mountingDepth: 80 },
+    }
+    const mkBand = (mount?: DesignBand['mount']): DesignBand[] => [
+      { driverId: 'test-woofer', role: 'low', lowpassFreq: 0, lowpassType: 'LR4', highpassFreq: 0, highpassType: 'LR4', gain: 0, polarity: 0, delay: 0, mount },
+    ]
+    const global = simulateOnAxisWithBands(mkBand(), [woofer], freqs, 320, 900, 'sealed', 0, 20, 0, 1)
+    const own = simulateOnAxisWithBands(
+      mkBand({ placement: 'front', baffleWMm: 150, baffleHMm: 150 }),
+      [woofer], freqs, 320, 900, 'sealed', 0, 20, 0, 1)
+    // Own dims flow to bandCurves, position = centered on the own panel
+    expect(own.bandCurves[0]!.baffleWMm).toBe(150)
+    expect(own.bandCurves[0]!.baffleHMm).toBe(150)
+    expect(own.bandCurves[0]!.position).toEqual({ xMm: 75, yMm: 75 })
+    expect(global.bandCurves[0]!.baffleWMm).toBeUndefined()
+    // The smaller own panel shifts the diffraction signature → curves differ audibly
+    let maxDiff = 0
+    for (let i = 0; i < freqs.length; i++) {
+      const f = freqs[i]!
+      if (f < 300 || f > 6000) continue
+      maxDiff = Math.max(maxDiff, Math.abs(global.summed[i]!.magnitude - own.summed[i]!.magnitude))
+    }
+    expect(maxDiff).toBeGreaterThan(0.3)
   })
 })

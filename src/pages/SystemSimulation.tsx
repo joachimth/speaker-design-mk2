@@ -7,7 +7,7 @@ import { crossoverSlopeDbPerOctave } from '@/lib/acoustic/crossover'
 import { calcBaffleStep, calcBaffleDiffraction, baffleStepFrequency } from '@/lib/acoustic/baffle'
 import { calcSpinoramaMultiDriver, pistonDirectivity } from '@/lib/acoustic/directivity'
 import { generateFrequencies } from '@/lib/acoustic/thieleSmall'
-import { suggestCrossover, suggestBaffle, optimizeGainsForRoom, acousticCenterDepth, type RoomOptimizationResult } from '@/lib/acoustic/autoDesign'
+import { suggestCrossover, suggestBaffle, optimizeGainsForRoom, computeAutoDelays, type RoomOptimizationResult } from '@/lib/acoustic/autoDesign'
 import { generateTargetCurve, optimizeForTargetCurve, type TargetCurveType } from '@/lib/acoustic/targetCurve'
 import { psychoacousticSmooth } from '@/lib/acoustic/smoothing'
 import { exportPlotToPng } from '@/lib/utils/pngExport'
@@ -175,6 +175,17 @@ export default function SystemSimulation() {
   const setPortDiameter = (v: number) => setPort({ diameter: v })
   const setNumPorts = (v: number) => setPort({ numPorts: v })
   function updateBand(index: number, updates: Partial<Band>) { storeUpdateBand(index, updates) }
+
+  // Merge a partial mount update while PRESERVING the other mount fields
+  // (zMm / own sub-baffle dims / x / y). Collapses to undefined (= pure auto)
+  // when nothing meaningful is left.
+  function updateMountFields(index: number, patch: Partial<BandMount>) {
+    const cur = bands[index]?.mount
+    const next: BandMount = { ...(cur ?? { placement: 'front' as const }), ...patch }
+    const empty = next.placement === 'front' && next.xMm == null && next.yMm == null
+      && !next.zMm && !next.baffleWMm && !next.baffleHMm
+    updateBand(index, { mount: empty ? undefined : next })
+  }
 
   // Local-only UI state
   const [showRoomSim, setShowRoomSim] = useState(true)
@@ -632,18 +643,17 @@ export default function SystemSimulation() {
     setRoundoverRadius(result.roundoverRadius)
   }
 
-  // Auto time-align: set delay so all acoustic centers are in the same plane
+  // Auto time-align: set delay so all FRONT-mounted acoustic centers are in
+  // the same plane. Side-mounted bands are excluded (shared, mount-aware
+  // computeAutoDelays) and keep their manual delay.
   function handleAutoTimeAlign() {
     const activeBands = bands.slice(0, ways)
-    const depths = activeBands.map((band) => {
-      const driver = driverMap.get(band.driverId)
-      return driver ? acousticCenterDepth(driver) : 40
-    })
-    const maxDepth = Math.max(...depths, 1)
+    const delays = computeAutoDelays(activeBands, drivers)
     const newBands = [...bands]
     for (let i = 0; i < ways && i < newBands.length; i++) {
-      const delayMs = (maxDepth - depths[i]!) / 343 // mm / (mm/ms) = ms (343000 mm/s = 343 mm/ms)
-      newBands[i] = { ...newBands[i]!, delay: Math.round(delayMs * 100) / 100 }
+      const d = delays[i]
+      if (d == null) continue
+      newBands[i] = { ...newBands[i]!, delay: d }
     }
     setBands(newBands)
   }
@@ -737,6 +747,8 @@ export default function SystemSimulation() {
       curve: wb.curve,
       hasRealResponse: wb.hasRealResponse,
       position: wb.position ?? null,
+      baffleWMm: wb.baffleWMm,
+      baffleHMm: wb.baffleHMm,
     }))
   }, [workerBands, driverMap])
 
@@ -794,6 +806,8 @@ export default function SystemSimulation() {
       curve: pb.curve.map((p) => p.magnitude),
       diameter: pistonDiameterOf(pb.driver),
       position: pb.position ?? null,
+      baffleWMm: pb.baffleWMm,
+      baffleHMm: pb.baffleHMm,
     }))
     return calcSpinoramaMultiDriver(
       bandCurves, freqs, baffleWidth, baffleHeight,
@@ -1463,6 +1477,7 @@ export default function SystemSimulation() {
       <PhaseAlignmentCard
         bands={bands.slice(0, ways)}
         ways={ways}
+        drivers={drivers}
         onPolarityChange={(i, pol) => updateBand(i, { polarity: pol })}
         onDelayChange={(i, delay) => updateBand(i, { delay })}
       />
@@ -1647,9 +1662,9 @@ export default function SystemSimulation() {
                   label="Montering"
                   value={band.mount?.placement === 'side' ? 'side' : band.mount?.yMm != null ? 'fixed' : 'auto'}
                   onChange={(v) => {
-                    if (v === 'auto') updateBand(i, { mount: undefined })
+                    if (v === 'auto') updateMountFields(i, { placement: 'front', xMm: undefined, yMm: undefined })
                     else if (v === 'side') updateBand(i, { mount: { placement: 'side', yMm: band.mount?.yMm } })
-                    else updateBand(i, { mount: { placement: 'front', xMm: band.mount?.xMm, yMm: band.mount?.yMm ?? Math.round(baffleHeight / 2) } })
+                    else updateMountFields(i, { placement: 'front', yMm: band.mount?.yMm ?? Math.round(baffleHeight / 2) })
                   }}
                   options={[
                     { value: 'auto', label: 'Auto (lodret stak)' },
@@ -1664,21 +1679,54 @@ export default function SystemSimulation() {
                       unit="mm fra bund"
                       value={band.mount.yMm}
                       step={5}
-                      onChange={(v) => updateBand(i, { mount: { placement: 'front', xMm: band.mount?.xMm, yMm: v } })}
+                      onChange={(v) => updateMountFields(i, { yMm: v })}
                     />
                     <NumberInput
                       label="X-position (center)"
                       unit="mm fra venstre"
                       value={band.mount.xMm ?? Math.round(baffleWidth / 2)}
                       step={5}
-                      onChange={(v) => updateBand(i, { mount: { placement: 'front', xMm: v, yMm: band.mount?.yMm ?? Math.round(baffleHeight / 2) } })}
+                      onChange={(v) => updateMountFields(i, { xMm: v })}
                     />
                   </>
                 )}
               </div>
+              {band.mount?.placement !== 'side' && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <NumberInput
+                    label="Plan-forskydning z"
+                    unit="mm (+ = tilbage)"
+                    value={band.mount?.zMm ?? 0}
+                    step={1}
+                    onChange={(v) => updateMountFields(i, { zMm: v !== 0 ? v : undefined })}
+                  />
+                  <NumberInput
+                    label="Egen baffel bredde"
+                    unit="mm (0 = fælles)"
+                    value={band.mount?.baffleWMm ?? 0}
+                    step={5}
+                    min={0}
+                    onChange={(v) => updateMountFields(i, { baffleWMm: v > 0 ? v : undefined })}
+                  />
+                  <NumberInput
+                    label="Egen baffel højde"
+                    unit="mm (0 = fælles)"
+                    value={band.mount?.baffleHMm ?? 0}
+                    step={5}
+                    min={0}
+                    onChange={(v) => updateMountFields(i, { baffleHMm: v > 0 ? v : undefined })}
+                  />
+                </div>
+              )}
+              {band.mount?.placement !== 'side' && (band.mount?.zMm || (band.mount?.baffleWMm && band.mount?.baffleHMm)) ? (
+                <div className="text-xs text-gray-500">
+                  Forskudt frontbaffel: {band.mount?.zMm ? `enheden sidder ${Math.abs(band.mount.zMm)} mm ${band.mount.zMm > 0 ? 'bag' : 'foran'} hovedplanet (indgår i tidsjustering og fasesum). ` : ''}
+                  {band.mount?.baffleWMm && band.mount?.baffleHMm ? `Kantdiffraktion beregnes på egen plade ${band.mount.baffleWMm}×${band.mount.baffleHMm} mm med enheden centreret (selve trinkanten modelleres ikke).` : ''}
+                </div>
+              ) : null}
               {band.mount?.placement === 'side' && (
                 <div className="text-xs text-gray-500">
-                  Sidemonteret{band.mount.yMm != null ? ` (${band.mount.yMm} mm fra bund)` : ''}: indgår ikke i frontbaffel-kantdiffraktion eller CAD-udskæring — bruger generisk baffelstep (dokumenteret tilnærmelse).
+                  Sidemonteret{band.mount.yMm != null ? ` (${band.mount.yMm} mm fra bund)` : ''}: indgår ikke i frontbaffel-kantdiffraktion, CAD-udskæring eller tidsjustering (auto-delay) — enheden spiller kun lavt, hvor cm-forskydninger er ukritiske. Bruger generisk baffelstep (dokumenteret tilnærmelse).
                 </div>
               )}
 

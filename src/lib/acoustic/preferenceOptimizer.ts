@@ -18,7 +18,7 @@ import { buildCrossoverFilter, filterPhaseRad, buildEqBiquad, eqBiquadPhaseRad }
 import { calcSpinoramaMultiDriver } from './directivity';
 import { computePreferenceScore, type PreferenceScoreResult } from './preferenceScore';
 import { generateFrequencies } from './thieleSmall';
-import { acousticCenterDepth, usableRange } from './autoDesign';
+import { usableRange, computeAutoDelays } from './autoDesign';
 
 export interface OptimizationParams {
   bands: DesignBand[];
@@ -96,19 +96,11 @@ export function scoreFromBands(
 // Auto-delay computation (acoustic center alignment)
 // ---------------------------------------------------------------------------
 
-function computeAutoDelays(bands: DesignBand[], drivers: Driver[]): number[] {
-  // Acoustic center depth for each band's driver
-  const depths = bands.map((band) => {
-    const driver = drivers.find((d) => d.id === band.driverId);
-    if (!driver) return 0;
-    return acousticCenterDepth(driver);
-  });
-
-  // Reference: deepest acoustic center (woofer is furthest back)
-  const maxDepth = Math.max(...depths);
-  // Delay = (maxDepth - thisDepth) / speed_of_sound [ms]
-  // speed of sound = 343000 mm/s
-  return depths.map((d) => Math.round(((maxDepth - d) / 343000) * 1000 * 100) / 100);
+function computeAutoDelaysLocal(bands: DesignBand[], drivers: Driver[]): number[] {
+  // Shared mount-aware implementation: side-mounted bands are excluded from
+  // the alignment (null) and keep their existing delay.
+  const delays = computeAutoDelays(bands, drivers);
+  return delays.map((d, i) => d ?? bands[i]?.delay ?? 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -283,8 +275,8 @@ export function optimizeForPreferenceScore(params: OptimizationParams): Optimiza
   // shallower drivers so their acoustic centers align is correct
   // regardless of whether the preference score rewards it. The fine
   // delay optimization (Phase 5) can then tune from this baseline.
-  const autoDelays = computeAutoDelays(bands, drivers);
-  reasoning.push(`Auto-delay sat fra akustisk centrum: [${autoDelays.map((d) => d.toFixed(2)).join(', ')}] ms.`);
+  const autoDelays = computeAutoDelaysLocal(bands, drivers);
+  reasoning.push(`Auto-delay sat fra akustisk centrum (sidemonterede bånd udeladt): [${autoDelays.map((d) => d.toFixed(2)).join(', ')}] ms.`);
   bestBands = bestBands.map((b, i) => ({ ...b, delay: autoDelays[i] ?? 0 }));
   // Re-score from the new baseline
   bestScore = scoreFromBands(

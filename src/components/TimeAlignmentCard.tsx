@@ -1,13 +1,16 @@
 // Time alignment card for System Simulation
 //
 // Visualizes acoustic center depths for each band's driver and lets the
-// user manually adjust delay to time-align the drivers. Shows the estimated
-// acoustic center depth, the delay in mm and ms, and a simple baffle cross-section
-// diagram with driver positions.
+// user manually adjust delay to time-align the drivers. Mount-aware:
+//  - side-mounted bands are EXCLUDED from the alignment (their acoustic
+//    center is not on the front baffle, and they only play low frequencies
+//    where cm-scale misalignment is uncritical) — delay stays manual.
+//  - mount.zMm (stepped/split front baffle) shifts a band's effective depth,
+//    so mechanical alignment shows up here exactly like electrical delay.
 
 import { useMemo } from 'react'
-import type { Driver } from '@/types'
-import { acousticCenterDepth } from '@/lib/acoustic/autoDesign'
+import type { Driver, BandMount } from '@/types'
+import { acousticCenterDepth, effectiveAcousticDepth } from '@/lib/acoustic/autoDesign'
 import { Card, NumberInput, Button } from '@/components/common/UI'
 
 const C = 343000 // mm/s speed of sound
@@ -23,6 +26,7 @@ interface Band {
   lowpassType: string
   highpassFreq: number
   highpassType: string
+  mount?: BandMount
 }
 
 interface Props {
@@ -49,15 +53,26 @@ const ROLE_LABELS: Record<string, string> = {
 
 export function TimeAlignmentCard({ bands, ways, drivers, onDelayChange, onAutoAlign }: Props) {
   const bandData = useMemo(() => {
-    const data: { band: Band; driver?: Driver; depth: number; delayMs: number; delayMm: number }[] = []
+    const data: {
+      band: Band
+      driver?: Driver
+      /** Effective depth behind the MAIN baffle plane [mm]; null = side-mounted (excluded) */
+      depth: number | null
+      baseDepth: number
+      zMm: number
+      delayMs: number
+      delayMm: number
+    }[] = []
     for (let i = 0; i < ways && i < bands.length; i++) {
       const band = bands[i]!
       const driver = drivers.find((d) => d.id === band.driverId)
-      const depth = driver ? acousticCenterDepth(driver) : 40
+      const depth = driver ? effectiveAcousticDepth(driver, band.mount) : 40
       data.push({
         band,
         driver,
         depth,
+        baseDepth: driver ? acousticCenterDepth(driver) : 40,
+        zMm: band.mount?.zMm ?? 0,
         delayMs: band.delay,
         delayMm: band.delay * C / 1000,
       })
@@ -65,7 +80,9 @@ export function TimeAlignmentCard({ bands, ways, drivers, onDelayChange, onAutoA
     return data
   }, [bands, ways, drivers])
 
-  const maxDepth = Math.max(...bandData.map((d) => d.depth), 1)
+  const frontData = bandData.filter((d) => d.depth != null)
+  const maxDepth = Math.max(...frontData.map((d) => d.depth!), 1)
+  const deepest = frontData.find((d) => d.depth === maxDepth)
 
   // Diagram dimensions
   const diagramWidth = 600
@@ -79,8 +96,12 @@ export function TimeAlignmentCard({ bands, ways, drivers, onDelayChange, onAutoA
       <div className="space-y-4">
         <p className="text-xs text-gray-500">
           Akustisk center er der hvor lyden "fødes" i enheden. For at tidsjustere
-          sættes delay så alle akustiske centre er i samme plan målt fra bafflen.
-          Den dybeste enhed (ofte bas) får 0 ms delay, andre får delay = (dybde_forskel / lydhastighed).
+          sættes delay så alle akustiske centre på FRONTEN er i samme plan: den
+          dybeste enhed får 0 ms, andre får delay = (dybde_forskel / lydhastighed).
+          Sidemonterede enheder indgår ikke — deres akustiske center ligger ikke
+          på frontbaflen, og de spiller kun lavt hvor cm-forskydninger er ukritiske.
+          Alternativ til elektrisk delay: forskyd enhedens baffelplan mekanisk
+          (Plan-forskydning z under Montering — to-delt frontbaffel).
         </p>
 
         <div className="flex gap-2">
@@ -102,9 +123,24 @@ export function TimeAlignmentCard({ bands, ways, drivers, onDelayChange, onAutoA
             {/* Each band as a horizontal bar */}
             {bandData.map((d, i) => {
               const y = 35 + i * 40
-              const barLength = d.depth * scale
               const color = ROLE_COLORS[d.band.role] ?? '#666'
 
+              if (d.depth == null) {
+                // Side-mounted: not part of the front-baffle depth model
+                return (
+                  <g key={i} opacity={0.55}>
+                    <text x={baffleX - 10} y={y + 4} textAnchor="end" fontSize={10} className="fill-gray-700 dark:fill-gray-300">
+                      {ROLE_LABELS[d.band.role] || d.band.role}
+                    </text>
+                    <line x1={baffleX} y1={y} x2={baffleX + maxBarLength * 0.5} y2={y} stroke={color} strokeWidth={2} strokeDasharray="6 5" />
+                    <text x={baffleX + maxBarLength * 0.5 + 8} y={y + 3} fontSize={9} className="fill-gray-500">
+                      sidemonteret — udenfor tidsjustering
+                    </text>
+                  </g>
+                )
+              }
+
+              const barLength = Math.max(d.depth, 0) * scale
               return (
                 <g key={i}>
                   {/* Label */}
@@ -115,12 +151,17 @@ export function TimeAlignmentCard({ bands, ways, drivers, onDelayChange, onAutoA
                   {/* Acoustic center bar */}
                   <line x1={baffleX} y1={y} x2={baffleX + barLength} y2={y} stroke={color} strokeWidth={4} opacity={0.7} />
 
+                  {/* Mechanical plane offset segment (stepped baffle) */}
+                  {d.zMm !== 0 && (
+                    <line x1={baffleX} y1={y} x2={baffleX + Math.max(Math.min(d.zMm, d.depth), 0) * scale} y2={y} stroke={color} strokeWidth={8} opacity={0.35} />
+                  )}
+
                   {/* Acoustic center marker */}
                   <circle cx={baffleX + barLength} cy={y} r={5} fill={color} />
 
                   {/* Depth label */}
                   <text x={baffleX + barLength + 8} y={y + 3} fontSize={9} className="fill-gray-600 dark:fill-gray-400">
-                    {d.depth.toFixed(0)}mm
+                    {d.depth.toFixed(0)}mm{d.zMm !== 0 ? ` (plan ${d.zMm > 0 ? '+' : ''}${d.zMm})` : ''}
                   </text>
 
                   {/* Delay indicator */}
@@ -149,7 +190,12 @@ export function TimeAlignmentCard({ bands, ways, drivers, onDelayChange, onAutoA
                 </div>
                 {d.driver && (
                   <span className="text-xs text-gray-500 flex-1 truncate">
-                    {d.driver.manufacturer} {d.driver.model} · center {d.depth.toFixed(0)}mm bag baffel
+                    {d.driver.manufacturer} {d.driver.model}
+                    {d.depth == null
+                      ? ' · sidemonteret (manuel delay)'
+                      : d.zMm !== 0
+                        ? ` · center ${d.baseDepth.toFixed(0)} mm ${d.zMm > 0 ? '+' : '−'} plan ${Math.abs(d.zMm)} mm = ${d.depth.toFixed(0)} mm bag hovedplan`
+                        : ` · center ${d.depth.toFixed(0)}mm bag baffel`}
                   </span>
                 )}
                 <NumberInput
@@ -169,23 +215,31 @@ export function TimeAlignmentCard({ bands, ways, drivers, onDelayChange, onAutoA
           })}
         </div>
 
-        {/* Summary */}
-        {bandData.length >= 2 && (
+        {/* Summary (front-mounted bands only) */}
+        {frontData.length >= 2 && (
           <div className="bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md p-3 space-y-1">
             <div className="text-xs text-brand-700 dark:text-brand-300">
-              Dybeste center: {maxDepth.toFixed(0)}mm ({bandData.find((d) => d.depth === maxDepth)?.band.role === 'low' ? 'Bas' : 'Mellem/Treble'})
+              Dybeste center (front): {maxDepth.toFixed(0)}mm ({deepest ? (ROLE_LABELS[deepest.band.role] || deepest.band.role) : '?'})
+              {bandData.some((d) => d.depth == null) ? ' · sidemonterede enheder er udeladt' : ''}
             </div>
             {(() => {
-              const aligned = bandData.every((d) => {
-                const expected = (maxDepth - d.depth) / C * 1000
+              const aligned = frontData.every((d) => {
+                const expected = (maxDepth - d.depth!) / C * 1000
                 return Math.abs(d.band.delay - expected) < 0.02
               })
               return (
                 <div className={`text-xs font-medium ${aligned ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                  {aligned ? '✓ Alle enheder er tidsjusteret' : '⚠ Delay svarer ikke til akustisk center forskydning'}
+                  {aligned ? '✓ Frontenheder er tidsjusteret' : '⚠ Delay svarer ikke til akustisk center forskydning'}
                 </div>
               )
             })()}
+          </div>
+        )}
+        {frontData.length === 1 && bandData.length >= 2 && (
+          <div className="bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md p-3">
+            <div className="text-xs text-brand-700 dark:text-brand-300">
+              Kun én frontenhed — intet at tidsjustere (sidemonterede enheder er udeladt).
+            </div>
           </div>
         )}
       </div>

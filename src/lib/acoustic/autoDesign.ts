@@ -18,6 +18,7 @@ import type {
   CabinetDimensions,
   SealedAlignment,
   FrequencyDataPoint,
+  BandMount,
 } from '@/types';
 import {
   calcSealed,
@@ -143,6 +144,48 @@ export function acousticCenterDepth(driver: Driver): number {
     return Math.max(base * 0.5, Math.min(estimated, base * 2.5));
   }
   return base;
+}
+
+/**
+ * Effective acoustic-center depth behind the MAIN baffle plane [mm],
+ * mount-aware:
+ *  - side-mounted: null — the acoustic center is not on the front baffle,
+ *    so the depth model does not apply (the unit only plays low frequencies
+ *    where cm-scale alignment is uncritical anyway).
+ *  - front: driver estimate + mechanical plane offset (mount.zMm, stepped
+ *    baffle; positive = recessed).
+ */
+export function effectiveAcousticDepth(driver: Driver, mount?: BandMount): number | null {
+  if (mount?.placement === 'side') return null;
+  return acousticCenterDepth(driver) + (mount?.zMm ?? 0);
+}
+
+/**
+ * Auto time-align delays [ms] per band, mount-aware. Single source of truth
+ * for the three auto-align entry points (SystemSimulation, CrossoverDesigner,
+ * preference optimizer).
+ *
+ * Reference = the DEEPEST effective acoustic center among FRONT-mounted
+ * bands; each front band gets delay = (maxDepth − depth) / c. Side-mounted
+ * bands (and bands without a driver) return null: they are excluded from the
+ * alignment and their existing delay is left untouched.
+ */
+export function computeAutoDelays(
+  bands: { driverId: string; mount?: BandMount }[],
+  drivers: Driver[],
+): (number | null)[] {
+  const depths = bands.map((band) => {
+    const driver = drivers.find((d) => d.id === band.driverId);
+    if (!driver) return null;
+    return effectiveAcousticDepth(driver, band.mount);
+  });
+  const front = depths.filter((d): d is number => d != null);
+  if (front.length === 0) return depths.map(() => null);
+  const maxDepth = Math.max(...front);
+  return depths.map((d) => {
+    if (d == null) return null;
+    return Math.round(((maxDepth - d) / 343000) * 1000 * 100) / 100; // mm → ms
+  });
 }
 
 /**

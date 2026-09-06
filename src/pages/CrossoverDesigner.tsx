@@ -5,7 +5,7 @@ import { Card, Select, NumberInput, Badge, Button, StatCard } from '@/components
 import { buildCrossoverFilter, applyCrossover, crossoverSlopeDbPerOctave } from '@/lib/acoustic/crossover'
 import { simulateOnAxisWithBands, complexSum } from '@/lib/acoustic/simulateBands'
 import { generateFrequencies } from '@/lib/acoustic/thieleSmall'
-import { suggestCrossover, acousticCenterDepth } from '@/lib/acoustic/autoDesign'
+import { suggestCrossover, computeAutoDelays } from '@/lib/acoustic/autoDesign'
 import { calcSystemPhase, assessGroupDelay } from '@/lib/acoustic/groupDelay'
 import { TimeAlignmentCard } from '@/components/TimeAlignmentCard'
 import { PhaseAlignmentCard } from '@/components/PhaseAlignmentCard'
@@ -214,17 +214,15 @@ export default function CrossoverDesigner() {
     })
   }, [crossoverCurves, freqs])
 
-  // Auto time-align: set delays based on acoustic center depths
+  // Auto time-align: mount-aware shared implementation — side-mounted bands
+  // are excluded and keep their manual delay.
   function handleAutoTimeAlign() {
     const activeBands = bands.slice(0, ways)
-    const depths = activeBands.map((band) => {
-      const driver = drivers.find((d) => d.id === band.driverId)
-      return driver ? acousticCenterDepth(driver) : 40
-    })
-    const maxDepth = Math.max(...depths, 1)
+    const delays = computeAutoDelays(activeBands, drivers)
     for (let i = 0; i < ways && i < bands.length; i++) {
-      const delayMs = (maxDepth - depths[i]!) / 343 // mm / (mm/ms) = ms
-      updateBand(i, { delay: Math.round(delayMs * 100) / 100 })
+      const d = delays[i]
+      if (d == null) continue
+      updateBand(i, { delay: d })
     }
   }
 

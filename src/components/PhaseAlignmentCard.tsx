@@ -7,7 +7,8 @@
 import { useMemo } from 'react'
 import { generateFrequencies } from '@/lib/acoustic/thieleSmall'
 import { buildCrossoverFilter, filterPhaseRad, buildEqBiquad, eqBiquadPhaseRad } from '@/lib/acoustic/crossover'
-import type { CrossoverType, EQFilter } from '@/types'
+import { effectiveAcousticDepth } from '@/lib/acoustic/autoDesign'
+import type { CrossoverType, EQFilter, BandMount, Driver } from '@/types'
 import { Card, Select } from '@/components/common/UI'
 
 interface Band {
@@ -22,11 +23,14 @@ interface Band {
   highpassFreq: number
   highpassType: string
   eqFilters?: EQFilter[]
+  mount?: BandMount
 }
 
 interface Props {
   bands: Band[]
   ways: 2 | 3 | 4
+  /** For the mechanical acoustic-center depth phase term (matches complexSum) */
+  drivers?: Driver[]
   onPolarityChange: (index: number, polarity: 0 | 180) => void
   onDelayChange: (index: number, delayMs: number) => void
 }
@@ -38,7 +42,7 @@ const ROLE_LABELS: Record<string, string> = {
   high: 'Diskant',
 }
 
-export function PhaseAlignmentCard({ bands, ways, onPolarityChange }: Props) {
+export function PhaseAlignmentCard({ bands, ways, drivers, onPolarityChange }: Props) {
   const freqs = useMemo(() => generateFrequencies(20, 20000, 12), [])
 
   // Compute per-band phase curves near crossover frequencies
@@ -68,6 +72,11 @@ export function PhaseAlignmentCard({ bands, ways, onPolarityChange }: Props) {
     for (let i = 0; i < ways && i < bands.length; i++) {
       const band = bands[i]!
       const phases: number[] = []
+
+      // Mechanical acoustic-center depth (same term as the complex sum):
+      // side-mounted bands use 0 — the front-baffle depth model does not apply.
+      const driver = drivers?.find((d) => d.id === band.driverId)
+      const depthMm = (driver ? effectiveAcousticDepth(driver, band.mount) : null) ?? 0
 
       // Build the crossover filters for this band (for phase computation)
       let lpFilter = null
@@ -100,6 +109,9 @@ export function PhaseAlignmentCard({ bands, ways, onPolarityChange }: Props) {
         // Delay adds phase = -2πf*delay (delay in ms → s)
         if (band.delay > 0) phaseRad += -2 * Math.PI * f * band.delay * 0.001
 
+        // Mechanical arrival-time phase from acoustic-center depth (+ zMm plan)
+        if (depthMm) phaseRad += -2 * Math.PI * f * (depthMm / 343000)
+
         // Convert to degrees and normalize to [-180, 180]
         let phaseDeg = (phaseRad * 180) / Math.PI
         phaseDeg = ((phaseDeg % 360) + 540) % 360 - 180
@@ -110,7 +122,7 @@ export function PhaseAlignmentCard({ bands, ways, onPolarityChange }: Props) {
       results.push({ freq: freqs, phase: phases })
     }
     return results
-  }, [bands, ways, freqs])
+  }, [bands, ways, freqs, drivers])
 
   if (crossoverPoints.length === 0) return null
 

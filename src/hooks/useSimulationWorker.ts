@@ -31,6 +31,11 @@ export interface ProcessedBand {
   curve: FrequencyDataPoint[]
   hasRealResponse: boolean
   position?: { xMm: number; yMm: number } | null
+  /** Own sub-baffle dims [mm] (split front baffle) for the spinorama delta */
+  baffleWMm?: number
+  baffleHMm?: number
+  /** Mechanical acoustic-center depth [mm] used in the complex sum */
+  depthMm?: number
 }
 
 interface SimResult {

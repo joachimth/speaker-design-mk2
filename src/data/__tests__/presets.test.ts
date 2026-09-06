@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { DESIGN_PRESETS, KUDOS_X2_PRESET, MK3_REFERENCE_PRESET } from '@/data/presets'
 import { SEED_DRIVERS } from '@/data/seedDrivers'
+import { computeAutoDelays } from '@/lib/acoustic/autoDesign'
 import { layoutBandPositions } from '@/lib/acoustic/baffleLayout'
 import { portLengthForTuning } from '@/engine/enclosure/vented'
 import { calcCabinetResponse } from '@/lib/acoustic/cabinetResponse'
@@ -154,5 +155,46 @@ describe('Mk3 Reference preset', () => {
     expect(result.params.fc!).toBeLessThan(41)
     expect(result.params.qtc!).toBeGreaterThan(0.73)
     expect(result.params.qtc!).toBeLessThan(0.79)
+  })
+})
+
+describe('Auto time-align on presets (mount-aware)', () => {
+  it('mk3: side-mounted bass is excluded, mid is the front reference, tweeter gets delay', () => {
+    const delays = computeAutoDelays(MK3_REFERENCE_PRESET.design.bands, SEED_DRIVERS)
+    expect(delays[0]).toBeNull()            // GRS side-mounted: untouched
+    expect(delays[1]).toBe(0)               // 18W deepest front band
+    expect(delays[2]!).toBeGreaterThan(0)   // SB26 shallower → positive delay
+    expect(delays[2]!).toBeLessThan(0.15)   // sanity: sub-0.15 ms scale
+  })
+
+  it('kudos x2: side-mounted bass excluded, front bands aligned', () => {
+    const delays = computeAutoDelays(KUDOS_X2_PRESET.design.bands, SEED_DRIVERS)
+    expect(delays[0]).toBeNull()
+    expect(delays[1]).toBe(0)
+    expect(delays[2]!).toBeGreaterThanOrEqual(0)
+  })
+
+  it('baked preset delays match the mount-aware auto-align (self-verifying)', () => {
+    for (const preset of DESIGN_PRESETS) {
+      const delays = computeAutoDelays(preset.design.bands, SEED_DRIVERS)
+      preset.design.bands.forEach((band, i) => {
+        if (delays[i] != null) {
+          expect(band.delay, `${preset.id} band ${i}`).toBeCloseTo(delays[i]!, 2)
+        }
+      })
+    }
+  })
+
+  it('every side-mounted preset band gets null (never auto-delayed)', () => {
+    for (const preset of DESIGN_PRESETS) {
+      const delays = computeAutoDelays(preset.design.bands, SEED_DRIVERS)
+      preset.design.bands.forEach((band, i) => {
+        if (band.mount?.placement === 'side') {
+          expect(delays[i], `${preset.id} band ${i}`).toBeNull()
+        } else {
+          expect(delays[i], `${preset.id} band ${i}`).not.toBeNull()
+        }
+      })
+    }
   })
 })
