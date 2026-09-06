@@ -68,7 +68,7 @@ export function simulateDesign(
       const effDriver = driverCount > 1 && driver.tsParams?.vas
         ? { ...driver, tsParams: { ...driver.tsParams, vas: driver.tsParams.vas * driverCount } }
         : driver
-      const cabinetResp = calcCabinetResponse(effDriver, cabinetType, freqs, baffleWidth, 0.707, cabinetType === 'ported' ? { fb: portFb ?? undefined, vb: portVb ?? undefined, portDiameter, numPorts } : undefined)
+      const cabinetResp = calcCabinetResponse(effDriver, cabinetType, freqs, baffleWidth, 0.707, cabinetType === 'ported' ? { fb: portFb ?? undefined, vb: portVb ?? undefined, portDiameter, numPorts } : cabinetType === 'sealed' ? { vb: portVb ?? undefined } : undefined)
       curve = curve.map((p, idx) => ({
         freq: p.freq,
         magnitude: p.magnitude + (cabinetResp.response[idx]?.magnitude ?? 0),

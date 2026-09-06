@@ -139,7 +139,11 @@ function estimateF3(
     freqs,
     200, // baffle width placeholder
     0.707,
-    cabinetType === 'ported' ? { fb: portFb || undefined, vb: volume || undefined } : undefined,
+    cabinetType === 'ported'
+      ? { fb: portFb || undefined, vb: volume || undefined }
+      : cabinetType === 'sealed'
+        ? { vb: volume || undefined }
+        : undefined,
   );
 
   // Find -3dB point

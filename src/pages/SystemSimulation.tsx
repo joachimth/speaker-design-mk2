@@ -1109,6 +1109,26 @@ export default function SystemSimulation() {
           </div>
         </div>
 
+        {/* Sealed volume (only for sealed cabinets) */}
+        {cabinetType === 'sealed' && (
+          <div className="mt-3 p-3 rounded-md bg-gray-50 dark:bg-gray-800/50">
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Lukket kabinet</label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Volumen Vb [L] (0=auto, Qtc 0.707)</label>
+                <input
+                  type="number"
+                  value={portVb ?? 0}
+                  step={1}
+                  onChange={(e) => setPortVb(parseFloat(e.target.value) || null)}
+                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100"
+                />
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-gray-500">Ved fast Vb udledes Fc/Qtc af volumen (alfa = Vas/Vb). Ved flere basdrivere bruges Vas × antal.</p>
+          </div>
+        )}
+
         {/* Port tuning controls (only for ported cabinets) */}
         {cabinetType === 'ported' && (
           <div className="mt-3 p-3 rounded-md bg-gray-50 dark:bg-gray-800/50">
@@ -1767,7 +1787,7 @@ export default function SystemSimulation() {
         const effDriver = dc > 1 && lowBand.driver.tsParams?.vas
           ? { ...lowBand.driver, tsParams: { ...lowBand.driver.tsParams, vas: lowBand.driver.tsParams.vas * dc } }
           : lowBand.driver
-        const cabResp = calcCabinetResponse(effDriver, cabinetType, freqs, baffleWidth, 0.707, cabinetType === 'ported' ? { fb: portFb ?? undefined, vb: portVb ?? undefined, portDiameter, numPorts } : undefined)
+        const cabResp = calcCabinetResponse(effDriver, cabinetType, freqs, baffleWidth, 0.707, cabinetType === 'ported' ? { fb: portFb ?? undefined, vb: portVb ?? undefined, portDiameter, numPorts } : cabinetType === 'sealed' ? { vb: portVb ?? undefined } : undefined)
         return (
           <Card title={`Kabinet respons (${cabinetType === 'sealed' ? 'Lukket' : cabinetType === 'ported' ? 'Med port' : cabinetType === 'transmission_line' ? 'Trans. line' : 'Ren baffel'})`}>
             <div className="space-y-2">

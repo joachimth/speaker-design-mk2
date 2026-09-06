@@ -127,7 +127,11 @@ export function processBand(
       freqs,
       baffleWidth,
       0.707,
-      cabinetType === 'ported' ? { fb: portFb || undefined, vb: portVb || undefined, portDiameter, numPorts } : undefined,
+      cabinetType === 'ported'
+        ? { fb: portFb || undefined, vb: portVb || undefined, portDiameter, numPorts }
+        : cabinetType === 'sealed'
+          ? { vb: portVb || undefined }
+          : undefined,
     );
     curve = curve.map((p, i) => ({
       freq: p.freq,

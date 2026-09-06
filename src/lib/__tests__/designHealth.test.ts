@@ -247,9 +247,14 @@ describe('evaluateDesign — metrics', () => {
     expect(h.metrics.score).toBeNull()
   })
 
-  it('larger sealed box gives deeper bass (lower F3)', () => {
-    const small = evaluateDesign(makeDesign({ portVb: 15 }), DRIVERS)
-    const large = evaluateDesign(makeDesign({ portVb: 120 }), DRIVERS)
-    expect(large.metrics.f3Hz!).toBeLessThanOrEqual(small.metrics.f3Hz!)
+  it('sealed Vb shapes F3: smaller box (higher Qtc/Fc) raises F3', () => {
+    // Both volumes stay at/above Qtc ≈ 0.707 (fixture: Qts 0.42, Vas 60 L).
+    // 10 L → Qtc ≈ 1.11 / Fc ≈ 79 Hz; 30 L → Qtc ≈ 0.73 / Fc ≈ 52 Hz.
+    // NOTE: very large sealed boxes go overdamped (Qtc < 0.6) and the shallow
+    // knee measured against midband RAISES F3 again — so "bigger is always
+    // lower F3" is intentionally NOT asserted.
+    const small = evaluateDesign(makeDesign({ portVb: 10 }), DRIVERS)
+    const large = evaluateDesign(makeDesign({ portVb: 30 }), DRIVERS)
+    expect(small.metrics.f3Hz!).toBeGreaterThan(large.metrics.f3Hz!)
   })
 })

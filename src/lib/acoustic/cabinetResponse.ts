@@ -24,7 +24,7 @@ import type {
   ThieleSmallParams,
   SealedAlignment,
 } from '@/types';
-import { calcSealed, calcPorted, calcPort, calcTransmissionLine } from './thieleSmall';
+import { calcSealed, calcSealedF3, calcPorted, calcPort, calcTransmissionLine } from './thieleSmall';
 import type { PortedDesignParams } from './thieleSmall';
 
 // Speed of sound [mm/s]
@@ -128,12 +128,25 @@ function hp3MagnitudeDb(f: number, fc: number): number {
  * This is positive around Fc (cabinet resonance boost) and negative
  * well below Fc (faster roll-off than free air).
  */
+/**
+ * @param overrideVb  Optional user-specified box volume [L]. When provided,
+ *                    the alignment (Fc/Qtc/F3) is derived FROM the volume
+ *                    (alpha = Vas/Vb) instead of from the Qtc target — so a
+ *                    real, measured cabinet simulates as built.
+ */
 function calcSealedLoading(
   ts: ThieleSmallParams,
   qtcTarget: number,
   frequencies: number[],
+  overrideVb?: number,
 ): { response: FrequencyDataPoint[]; alignment: SealedAlignment } {
-  const alignment = calcSealed(ts, qtcTarget);
+  let alignment = calcSealed(ts, qtcTarget);
+  if (overrideVb && overrideVb > 0 && ts.vas && ts.vas > 0) {
+    const alpha = ts.vas / overrideVb;
+    const fc = ts.fs * Math.sqrt(1 + alpha);
+    const qtc = ts.qts * Math.sqrt(1 + alpha);
+    alignment = { vb: overrideVb, fc, qtc, f3: calcSealedF3(fc, qtc) };
+  }
 
   const response = frequencies.map((f) => {
     const sealedDb = hp2MagnitudeDb(f, alignment.fc, alignment.qtc);
@@ -284,7 +297,7 @@ export function calcCabinetResponse(
     // models (engine/enclosure/*) drive the cards in Kabinetdesign.
     case 'horn':
     case 'sealed': {
-      const { response, alignment } = calcSealedLoading(ts, qtcTarget, frequencies);
+      const { response, alignment } = calcSealedLoading(ts, qtcTarget, frequencies, portTuning?.vb);
       return {
         response,
         type,

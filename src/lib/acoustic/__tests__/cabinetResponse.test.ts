@@ -229,3 +229,40 @@ describe('calcCabinetResponse ported with port tuning', () => {
     expect(result.description).toContain('× 2');
   });
 });
+
+// --- Sealed Vb override (mk3 preset support) ---
+describe('sealed with user-specified Vb', () => {
+  const woofer = SEED_DRIVERS.find((d) => d.id === 'seed-wavecor-wf146wa01')!;
+  const ts = woofer.tsParams!;
+
+  it('derives Fc/Qtc from the volume (alpha = Vas/Vb) instead of the Qtc target', () => {
+    const vb = 20;
+    const result = calcCabinetResponse(woofer, 'sealed', FREQS, 300, 0.707, { vb });
+    const alpha = ts.vas / vb;
+    expect(result.params.vb).toBe(vb);
+    expect(result.params.fc!).toBeCloseTo(ts.fs * Math.sqrt(1 + alpha), 6);
+    expect(result.params.qtc!).toBeCloseTo(ts.qts * Math.sqrt(1 + alpha), 6);
+  });
+
+  it('keeps the auto Qtc-target alignment when no Vb is given (regression)', () => {
+    const result = calcCabinetResponse(woofer, 'sealed', FREQS, 300, 0.707);
+    expect(result.params.qtc!).toBeCloseTo(0.707, 6);
+  });
+
+  it('a smaller box rolls off earlier than the auto alignment', () => {
+    const auto = calcCabinetResponse(woofer, 'sealed', FREQS, 300, 0.707);
+    const small = calcCabinetResponse(woofer, 'sealed', FREQS, 300, 0.707, {
+      vb: auto.params.vb! / 3,
+    });
+    expect(small.params.fc!).toBeGreaterThan(auto.params.fc!);
+    const idx = FREQS.findIndex((f) => f >= 30);
+    expect(small.response[idx]!.magnitude).toBeLessThan(auto.response[idx]!.magnitude);
+  });
+
+  it('ignores a zero/undefined Vb override safely', () => {
+    const a = calcCabinetResponse(woofer, 'sealed', FREQS, 300, 0.707, { vb: 0 });
+    const b = calcCabinetResponse(woofer, 'sealed', FREQS, 300, 0.707);
+    expect(a.params.qtc).toBeCloseTo(b.params.qtc!, 9);
+    expect(a.params.vb).toBeCloseTo(b.params.vb!, 9);
+  });
+});
