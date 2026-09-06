@@ -218,6 +218,24 @@ export interface Crossover {
 // Design state (serializable snapshot of SystemSimulation)
 // ---------------------------------------------------------------------------
 
+/**
+ * Optional mounting override for a band's driver (SPEC-udvidelse, Sep 6).
+ * Without it the driver is auto-placed in the vertical centerline stack.
+ */
+export interface BandMount {
+  /**
+   * 'front' (default): on the front baffle — participates in edge
+   * diffraction and CAD cutouts. 'side': mounted on a side panel —
+   * excluded from front-baffle layout/diffraction/CAD (falls back to the
+   * generic baffle-step shelf, documented approximation).
+   */
+  placement: 'front' | 'side';
+  /** Explicit center X on the front baffle [mm from left edge]; default centerline */
+  xMm?: number;
+  /** Explicit center Y [mm from bottom edge]. For side-mounted drivers this is informational (height on the side panel). */
+  yMm?: number;
+}
+
 export interface DesignBand {
   driverId: string;
   role: 'low' | 'mid' | 'mid2' | 'high';
@@ -230,6 +248,8 @@ export interface DesignBand {
   polarity: 0 | 180;
   delay: number;
   eqFilters?: EQFilter[];  // per-band EQ (low-shelf, high-shelf, PEQ)
+  /** Mounting override: fixed front-baffle position or side-mounting (default: auto stack) */
+  mount?: BandMount;
 }
 
 export interface RoomParams {

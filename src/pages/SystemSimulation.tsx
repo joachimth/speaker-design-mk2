@@ -30,7 +30,8 @@ import { PhaseAlignmentCard } from '@/components/PhaseAlignmentCard'
 import { EQFiltersCard } from '@/components/EQFiltersCard'
 import { CrossoverSlider } from '@/components/CrossoverSlider'
 import { NextStep } from '@/components/NextStep'
-import type { CrossoverType, FrequencyDataPoint, Driver, CabinetType, DesignState, Project, Cabinet, EQFilter } from '@/types'
+import type { CrossoverType, FrequencyDataPoint, Driver, CabinetType, DesignState, Project, Cabinet, EQFilter, BandMount } from '@/types'
+import { DESIGN_PRESETS } from '@/data/presets'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -79,6 +80,7 @@ interface Band {
   polarity: 0 | 180
   delay: number
   eqFilters?: EQFilter[]
+  mount?: BandMount
 }
 
 const DEFAULT_BANDS_2: Band[] = [
@@ -135,7 +137,7 @@ function interpolateAt(curve: FrequencyDataPoint[], freq: number): number {
 export default function SystemSimulation() {
   const { drivers } = useDriverStore()
   const { simHandoff, setSimHandoff } = useProjectStore()
-  const { design, updateDesign, setWays: storeSetWays, setBands: storeSetBands, updateBand: storeUpdateBand, setBaffle, setPort, setRoomParams: storeSetRoomParams, setCabinetType: storeSetCabinetType, projectName, setProjectName, markClean } = useDesignStore()
+  const { design, updateDesign, setWays: storeSetWays, setBands: storeSetBands, updateBand: storeUpdateBand, setBaffle, setPort, setRoomParams: storeSetRoomParams, setCabinetType: storeSetCabinetType, projectName, setProjectName, markClean, loadDesign } = useDesignStore()
 
   // Shared design state from the store
   const ways = design.ways
@@ -1323,6 +1325,27 @@ export default function SystemSimulation() {
           Gemmer aktuelle indstillinger (enheder, delefilter, baffel, kabinet, rum) i browseren. Brug Overblik-siden for at indlæse eller importere projekter.
         </p>
 
+        {/* Built-in presets: complete designs shipped with the app */}
+        <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+          <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Indbyggede presets</div>
+          <div className="flex flex-col gap-2">
+            {DESIGN_PRESETS.map((p) => (
+              <div key={p.id} className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <Button
+                  onClick={() => {
+                    if (bands.some((b) => b.driverId) && !window.confirm(`Indlæs preset "${p.name}"? Det aktive design overskrives (gem det først hvis du vil beholde det).`)) return
+                    loadDesign(JSON.parse(JSON.stringify(p.design)) as DesignState, p.name)
+                  }}
+                  variant="secondary"
+                >
+                  📦 {p.name}
+                </Button>
+                <p className="text-xs text-gray-500 flex-1">{p.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Biquad export panel */}
         {showBiquad && (
           <div className="mt-4 border border-gray-200 dark:border-gray-700 rounded-md p-3 space-y-3">
@@ -1597,6 +1620,47 @@ export default function SystemSimulation() {
                 />
                 <NumberInput label="Delay" unit="ms" value={band.delay} step={0.01} onChange={(v) => updateBand(i, { delay: v })} />
               </div>
+
+              {/* Mounting: auto stack, fixed front position or side panel */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <Select
+                  label="Montering"
+                  value={band.mount?.placement === 'side' ? 'side' : band.mount?.yMm != null ? 'fixed' : 'auto'}
+                  onChange={(v) => {
+                    if (v === 'auto') updateBand(i, { mount: undefined })
+                    else if (v === 'side') updateBand(i, { mount: { placement: 'side', yMm: band.mount?.yMm } })
+                    else updateBand(i, { mount: { placement: 'front', xMm: band.mount?.xMm, yMm: band.mount?.yMm ?? Math.round(baffleHeight / 2) } })
+                  }}
+                  options={[
+                    { value: 'auto', label: 'Auto (lodret stak)' },
+                    { value: 'fixed', label: 'Fast position (front)' },
+                    { value: 'side', label: 'Sidemonteret' },
+                  ]}
+                />
+                {band.mount?.placement !== 'side' && band.mount?.yMm != null && (
+                  <>
+                    <NumberInput
+                      label="Y-position (center)"
+                      unit="mm fra bund"
+                      value={band.mount.yMm}
+                      step={5}
+                      onChange={(v) => updateBand(i, { mount: { placement: 'front', xMm: band.mount?.xMm, yMm: v } })}
+                    />
+                    <NumberInput
+                      label="X-position (center)"
+                      unit="mm fra venstre"
+                      value={band.mount.xMm ?? Math.round(baffleWidth / 2)}
+                      step={5}
+                      onChange={(v) => updateBand(i, { mount: { placement: 'front', xMm: v, yMm: band.mount?.yMm ?? Math.round(baffleHeight / 2) } })}
+                    />
+                  </>
+                )}
+              </div>
+              {band.mount?.placement === 'side' && (
+                <div className="text-xs text-gray-500">
+                  Sidemonteret{band.mount.yMm != null ? ` (${band.mount.yMm} mm fra bund)` : ''}: indgår ikke i frontbaffel-kantdiffraktion eller CAD-udskæring — bruger generisk baffelstep (dokumenteret tilnærmelse).
+                </div>
+              )}
 
               {(band.driverCount ?? 1) > 1 && (
                 <div className="text-xs text-brand-600 dark:text-brand-400">
